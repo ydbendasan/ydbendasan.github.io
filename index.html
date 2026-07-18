@@ -177,6 +177,17 @@
   #startMode.off { color: var(--neon); border-color: rgba(39,232,255,.45); }
   #startMode:active { background: rgba(255,255,255,.1); }
 
+  /* ---------------- Viewer-build store links ---------------- */
+  #storeLinks { margin-top: 26px; display: flex; flex-direction: column; gap: 12px; }
+  #storeLinks a {
+    font-family: var(--mono); font-size: 13px; letter-spacing: 3px; text-align: center;
+    text-decoration: none; padding: 13px 26px; border-radius: 6px; touch-action: manipulation;
+  }
+  #playStoreLink { color: var(--good); border: 1px solid rgba(182,255,46,.55); }
+  #playStoreLink:active { background: rgba(182,255,46,.15); }
+  #itchLink { color: var(--neon); border: 1px solid rgba(39,232,255,.45); font-size: 11px; }
+  #itchLink:active { background: rgba(39,232,255,.15); }
+
   /* ---------------- New-best share offer ---------------- */
   #bestPrompt {
     position: fixed; inset: 0; z-index: 22;
@@ -228,6 +239,10 @@
     <div id="startInfo"></div>
     <button id="startPlay" type="button">TAP TO PLAY</button>
     <button id="startMode" type="button">MODE &middot; NORMAL</button>
+    <div id="storeLinks" class="hidden">
+      <a id="playStoreLink" href="https://play.google.com/store/apps/details?id=com.ydbendasan.apexswing">GET THE APP &middot; GOOGLE PLAY</a>
+      <a id="itchLink" href="https://ydbendasan.itch.io/perfect-arcade">PLAY IN BROWSER &middot; ITCH.IO</a>
+    </div>
   </div>
 
   <div id="runOffer" class="hidden">
@@ -401,9 +416,19 @@ const native = (() => {
   const cap = window.Capacitor;
   const on = !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform());
   if (!on) return { on: false };
-  const plug = (name) => { try { return cap.registerPlugin(name); } catch (e) { return null; } };
+  // Plugins are read from the bridge's registry (window.Capacitor.Plugins) —
+  // the registerPlugin() API is a bundler-only export of @capacitor/core and
+  // does NOT exist on the injected global.
+  const plug = (name) => {
+    try { return (cap.Plugins && cap.Plugins[name]) || null; } catch (e) { return null; }
+  };
   return { on: true, Haptics: plug('Haptics'), Share: plug('Share'), Filesystem: plug('Filesystem'), App: plug('App') };
 })();
+
+// Watch-only viewer: the App Links host serves replay spectating plus store
+// links, not the free full game (that's itch's job). Same file ships
+// everywhere — the app and itch keep the full game; the hostname decides.
+const VIEWER = !native.on && /(^|\.)ydbendasan\.github\.io$/.test(location.hostname);
 
 // One buzz helper for the three call sites: a light tick, a bump, or a crash.
 // Native gets graded haptics; the web keeps navigator.vibrate.
@@ -1967,8 +1992,14 @@ function showRunOffer(rep) {
 }
 
 function checkSharedRunLink() {
+  const raw = (location.hash || '') + (location.search || '');
   const rep = extractReplay(location.hash || '') || extractReplay(location.search || '');
-  if (!rep) return;
+  if (!rep) {
+    // A #r= that won't decode is a broken (usually truncated) link — say so
+    // instead of silently showing a fresh game.
+    if (/[#&?]r=/.test(raw)) flash('RUN LINK UNREADABLE — GET THE FULL LINK', COLORS.BAD, 2400);
+    return;
+  }
   try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
   showRunOffer(rep);
 }
@@ -2230,7 +2261,7 @@ window.addEventListener('keydown', (e) => {
   if (e.target && e.target.tagName === 'INPUT') return;   // typing a seed phrase
   if (e.key !== ' ') return;
   if (anyModalOpen()) return;   // a dialog owns input
-  if (!started) { audio.unlock(); enterSwing(); return; }
+  if (!started) { if (VIEWER) return; audio.unlock(); enterSwing(); return; }
   if (swing.replay) { showReplayOffer(); return; }         // exit a replay -> options
   if (swing.awaitTap) {                  // "still there?" -> this key answers
     swing.awaitTap = false; swing.idleDeaths = 0;
@@ -2488,13 +2519,29 @@ updateThemeBtn();
 updateModeBtns();
 updateStart();
 resize();
+// Viewer build: strip every route into free play — spectating and store
+// links only. WATCH stays; sound/theme toggles stay for the spectator.
+if (VIEWER) {
+  for (const el of [ui.startPlay, ui.startMode, ui.runOfferPlay,
+                    ui.courseBtn, ui.watchBtn, ui.shareBtn, ui.modeBtn, ui.retry]) {
+    el.classList.add('hidden');
+  }
+  document.getElementById('startTag').textContent =
+    'WATCH SHARED RUNS HERE · GET THE APP TO PLAY';
+  document.getElementById('runOfferHint').textContent =
+    'WATCH IT REPLAYED · GET THE APP TO PLAY IT YOURSELF.';
+  document.getElementById('storeLinks').classList.remove('hidden');
+}
+
 checkSharedRunLink();   // opened via a shared run deep link?
 // Native: App Links hand the URL to the app instead of the page location —
 // on a cold start via getLaunchUrl, warm (app already running) via appUrlOpen.
 if (native.on && native.App) {
   const offerFromUrl = (url) => {
-    const rep = url && extractReplay(url);
+    if (!url) return;
+    const rep = extractReplay(url);
     if (rep) showRunOffer(rep);
+    else if (/[#&?]r=/.test(url)) flash('RUN LINK UNREADABLE — GET THE FULL LINK', COLORS.BAD, 2400);
   };
   try {
     native.App.addListener('appUrlOpen', (e) => offerFromUrl(e && e.url));
