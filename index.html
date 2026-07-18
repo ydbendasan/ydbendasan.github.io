@@ -178,15 +178,17 @@
   #startMode:active { background: rgba(255,255,255,.1); }
 
   /* ---------------- Viewer-build store links ---------------- */
-  #storeLinks { margin-top: 26px; display: flex; flex-direction: column; gap: 12px; }
-  #storeLinks a {
+  #storeLinks, #runOfferStore { display: flex; flex-direction: column; gap: 12px; }
+  #storeLinks { margin-top: 26px; }
+  #runOfferStore { margin-top: 2px; }
+  .playLink, .itchLink {
     font-family: var(--mono); font-size: 13px; letter-spacing: 3px; text-align: center;
     text-decoration: none; padding: 13px 26px; border-radius: 6px; touch-action: manipulation;
   }
-  #playStoreLink { color: var(--good); border: 1px solid rgba(182,255,46,.55); }
-  #playStoreLink:active { background: rgba(182,255,46,.15); }
-  #itchLink { color: var(--neon); border: 1px solid rgba(39,232,255,.45); font-size: 11px; }
-  #itchLink:active { background: rgba(39,232,255,.15); }
+  .playLink { color: var(--good); border: 1px solid rgba(182,255,46,.55); }
+  .playLink:active { background: rgba(182,255,46,.15); }
+  .itchLink { color: var(--neon); border: 1px solid rgba(39,232,255,.45); font-size: 11px; }
+  .itchLink:active { background: rgba(39,232,255,.15); }
 
   /* ---------------- New-best share offer ---------------- */
   #bestPrompt {
@@ -240,8 +242,8 @@
     <button id="startPlay" type="button">TAP TO PLAY</button>
     <button id="startMode" type="button">MODE &middot; NORMAL</button>
     <div id="storeLinks" class="hidden">
-      <a id="playStoreLink" href="https://play.google.com/store/apps/details?id=com.ydbendasan.apexswing">GET THE APP &middot; GOOGLE PLAY</a>
-      <a id="itchLink" href="https://ydbendasan.itch.io/perfect-arcade">PLAY IN BROWSER &middot; ITCH.IO</a>
+      <a id="playStoreLink" class="playLink" href="https://play.google.com/store/apps/details?id=com.ydbendasan.apexswing">GET THE APP &middot; GOOGLE PLAY</a>
+      <a id="itchLink" class="itchLink" href="https://ydbendasan.itch.io/perfect-arcade">PLAY IN BROWSER &middot; ITCH.IO</a>
     </div>
   </div>
 
@@ -254,6 +256,10 @@
         <button id="runOfferWatch" type="button">WATCH RUN</button>
         <button id="runOfferPlay" type="button">PLAY COURSE</button>
         <button id="runOfferLater" type="button">LATER</button>
+      </div>
+      <div id="runOfferStore" class="hidden">
+        <a class="playLink" href="https://play.google.com/store/apps/details?id=com.ydbendasan.apexswing">GET THE APP &middot; GOOGLE PLAY</a>
+        <a class="itchLink" href="https://ydbendasan.itch.io/perfect-arcade">PLAY IN BROWSER &middot; ITCH.IO</a>
       </div>
     </div>
   </div>
@@ -2057,8 +2063,12 @@ function renderShareCard() {
   const best = Math.max((as.courseBest || {})[swing.courseName] || 0, swing.sessionBest);
   let cleared = 0;
   for (let n = 1; sectionEndM(n) <= best; n++) cleared = n;
+  // The instruction sits directly ON the phrase so there's no doubt about
+  // what to type — the footer URL is a different affordance (watch/get app).
+  g.fillStyle = 'rgba(39,232,255,.85)'; g.font = `700 34px ${mono}`;
+  g.fillText('TYPE THIS PHRASE TO PLAY MY COURSE', S / 2, 268);
   g.fillStyle = '#cfe9ff'; g.font = `700 58px ${mono}`;
-  g.fillText(`“${swing.courseName}”`, S / 2, 340);
+  g.fillText(`“${swing.courseName}”`, S / 2, 348);
   g.fillStyle = COLORS.GOOD; g.font = `800 220px ${mono}`;
   g.shadowColor = 'rgba(182,255,46,.6)'; g.shadowBlur = 42;
   g.fillText(`${best} m`, S / 2, 600);
@@ -2082,7 +2092,7 @@ function renderShareCard() {
   g.beginPath(); g.arc(902, 420, 12, 0, 7); g.fill();
 
   g.fillStyle = '#cfe9ff'; g.font = `700 36px ${mono}`;
-  g.fillText('TYPE THE PHRASE · BEAT THE DISTANCE', S / 2, 900);
+  g.fillText('BEAT MY DISTANCE · GET APEX SWING', S / 2, 900);
   g.fillStyle = '#ffffff'; g.font = `700 40px ${mono}`;
   g.fillText(CONFIG.SHARE_URL.replace('https://', '').replace(/\/$/, ''), S / 2, 1000);
   return cv;
@@ -2522,7 +2532,7 @@ resize();
 // Viewer build: strip every route into free play — spectating and store
 // links only. WATCH stays; sound/theme toggles stay for the spectator.
 if (VIEWER) {
-  for (const el of [ui.startPlay, ui.startMode, ui.runOfferPlay,
+  for (const el of [ui.startPlay, ui.startMode, ui.runOfferPlay, ui.runOfferLater,
                     ui.courseBtn, ui.watchBtn, ui.shareBtn, ui.modeBtn, ui.retry]) {
     el.classList.add('hidden');
   }
@@ -2531,6 +2541,15 @@ if (VIEWER) {
   document.getElementById('runOfferHint').textContent =
     'WATCH IT REPLAYED · GET THE APP TO PLAY IT YOURSELF.';
   document.getElementById('storeLinks').classList.remove('hidden');
+  // The offer carries the store links itself (LATER had nothing to return
+  // to); tapping the backdrop still dismisses, mirroring what LATER did.
+  document.getElementById('runOfferStore').classList.remove('hidden');
+  ui.runOffer.addEventListener('pointerup', (e) => {
+    if (e.target !== ui.runOffer) return;
+    pendingRunOffer = null;
+    ui.runOffer.classList.add('hidden');
+    if (started) returnToStart();
+  });
 }
 
 checkSharedRunLink();   // opened via a shared run deep link?
