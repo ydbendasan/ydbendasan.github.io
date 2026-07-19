@@ -621,8 +621,9 @@ const store = {
   LEGACY_KEY: 'arcade.v2',   // migrate the two-game save's swing half
   data: {
     // course: null = the shared daily; otherwise a custom seed phrase.
-    // courseBest / courseReplay map phrase -> best distance / replay code.
-    apex_swing: { bestDistance: 0, runs: 0, course: null, courseBest: {}, courseReplay: {} },
+    // courseBest maps phrase -> best distance. Recordings live in IndexedDB
+    // (see `runs`); courseReplay survives only long enough to migrate.
+    apex_swing: { bestDistance: 0, runs: 0, course: null, courseBest: {} },
     settings: { sound: true, theme: 'rhythm', difficulty: 'normal' },   // theme: neon | rhythm | dream · difficulty: normal | serene
   },
   load() {
@@ -643,7 +644,155 @@ const store = {
   },
   save() {
     try { localStorage.setItem(this.KEY, JSON.stringify(this.data)); }
-    catch (e) { /* ignore */ }
+    catch (e) {
+      // Quota (or blocked storage) used to be swallowed, so a full disk lost
+      // bests silently. Say it once — the player can clear runs to recover.
+      if (!this.warned) { this.warned = true; flash('STORAGE FULL · PROGRESS NOT SAVED', COLORS.BAD, 3200); }
+    }
+  },
+};
+
+/* ============================================================================
+   Run recordings — IndexedDB, not localStorage. A trajectory is kilobytes
+   (a long run ~80KB), and localStorage is a synchronous ~5MB string store
+   shared with settings: recordings there crowd out progress and can fail the
+   whole save. IDB holds them separately, asynchronously, with room to spare.
+
+   Reads stay synchronous for callers via an in-memory mirror loaded at boot;
+   writes update the mirror immediately and persist in the background.
+   ============================================================================ */
+const runs = {
+  DB: 'apexSwing', STORE: 'runs', VERSION: 1,
+  MAX_RUNS: 40,              // recordings kept, newest-first
+  MAX_BYTES: 6 * 1024 * 1024,
+  db: null,
+  cache: new Map(),          // course -> { course, code, dist, section, at }
+  ready: false,
+
+  open() {
+    return new Promise((resolve) => {
+      let req;
+      try { req = indexedDB.open(this.DB, this.VERSION); }
+      catch (e) { resolve(null); return; }          // private mode / blocked
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(this.STORE)) {
+          db.createObjectStore(this.STORE, { keyPath: 'course' });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+      req.onblocked = () => resolve(null);
+    });
+  },
+
+  async load() {
+    this.db = await this.open();
+    if (this.db) {
+      const all = await new Promise((resolve) => {
+        try {
+          const req = this.db.transaction(this.STORE, 'readonly')
+            .objectStore(this.STORE).getAll();
+          req.onsuccess = () => resolve(req.result || []);
+          req.onerror = () => resolve([]);
+        } catch (e) { resolve([]); }
+      });
+      // A run finished while this was loading is newer than anything on
+      // disk — never let the stored copy overwrite it.
+      for (const r of all) if (r && r.course && !this.cache.has(r.course)) this.cache.set(r.course, r);
+      this.migrateFromLocalStorage();
+    } else {
+      // No IndexedDB (private mode, blocked upgrade): keep using the old
+      // localStorage home rather than stranding the player's recordings.
+      const old = store.data.apex_swing.courseReplay || {};
+      for (const [course, code] of Object.entries(old)) {
+        if (!this.cache.has(course)) {
+          this.cache.set(course, { course, code, dist: (store.data.apex_swing.courseBest || {})[course] || 0, section: 1, at: 0 });
+        }
+      }
+    }
+    this.ready = true;
+    // the browser may have opened the runs list before this resolved
+    if (!ui.runsModal.classList.contains('hidden')) renderRunsList();
+  },
+
+  // Pre-IDB saves kept recordings inside the localStorage blob; move them
+  // over once, then drop them so they stop competing for that quota. Only
+  // ever called with a live db: without one there is nowhere to move them
+  // to, and deleting would destroy the player's recordings outright.
+  migrateFromLocalStorage() {
+    const as = store.data.apex_swing;
+    const old = as.courseReplay;
+    if (!this.db || !old || !Object.keys(old).length) return;
+    const at = Date.now();
+    for (const [course, code] of Object.entries(old)) {
+      if (!this.cache.has(course)) {
+        this.put({ course, code, dist: (as.courseBest || {})[course] || 0, section: 1, at });
+      }
+    }
+    delete as.courseReplay;
+    store.save();
+  },
+
+  get(course) {
+    const r = this.cache.get(course);
+    return r ? r.code : null;
+  },
+  has(course) { return this.cache.has(course); },
+  // newest first — the order BEST RUNS lists them in
+  list() {
+    return [...this.cache.values()].sort((a, b) => (b.at || 0) - (a.at || 0));
+  },
+
+  put(rec) {
+    this.cache.set(rec.course, rec);
+    this.write(rec);
+    this.evict();   // after the write: evicting the new record would leave
+                    // it in IDB but not in the cache, and back after a reload
+  },
+
+  // Explicit retention, so nothing disappears by accident: hold MAX_RUNS
+  // recordings within MAX_BYTES, dropping daily courses before named ones
+  // (a daily is one day's puzzle; a phrase someone typed is a choice) and
+  // oldest before newest.
+  evict() {
+    const isDaily = (c) => /^daily\b/i.test(c);
+    let list = this.list();
+    const over = () => list.length > this.MAX_RUNS ||
+      list.reduce((n, r) => n + (r.code ? r.code.length : 0), 0) > this.MAX_BYTES;
+    while (list.length > 1 && over()) {
+      const victim = list.filter((r) => isDaily(r.course)).pop() || list[list.length - 1];
+      this.remove(victim.course);   // drops it from both the cache and IDB
+      list = this.list();
+    }
+  },
+
+  write(rec) {
+    if (!this.db) {   // localStorage fallback keeps a smaller, capped set
+      const as = store.data.apex_swing;
+      as.courseReplay = as.courseReplay || {};
+      as.courseReplay[rec.course] = rec.code;
+      const keys = Object.keys(as.courseReplay);
+      if (keys.length > 10) delete as.courseReplay[keys[0]];
+      store.save();
+      return;
+    }
+    try {
+      const tx = this.db.transaction(this.STORE, 'readwrite');
+      tx.objectStore(this.STORE).put(rec);
+      tx.onerror = () => flash('COULDN’T SAVE THE RECORDING', COLORS.BAD, 2600);
+    } catch (e) { /* store gone: the in-memory copy still serves this session */ }
+  },
+  remove(course) {
+    this.cache.delete(course);
+    if (!this.db) {
+      const old = store.data.apex_swing.courseReplay;
+      if (old && old[course]) { delete old[course]; store.save(); }
+      return;
+    }
+    try {
+      this.db.transaction(this.STORE, 'readwrite').objectStore(this.STORE).delete(course);
+    } catch (e) { /* nothing to do */ }
   },
 };
 
@@ -1467,10 +1616,7 @@ function swingDie() {
   const code = encodeTrajectory(m);   // TR1: the recorded path, not the inputs
   swing.lastRunCode = code;
   if (m > prev) {
-    as.courseReplay = as.courseReplay || {};
-    as.courseReplay[swing.courseName] = code;
-    const reps = Object.keys(as.courseReplay);
-    if (reps.length > 10) delete as.courseReplay[reps[0]];
+    runs.put({ course: swing.courseName, code, dist: m, section: swing.section, at: Date.now() });
   }
   store.save();
 
@@ -2959,8 +3105,7 @@ function startVideoShare(rep) {
     return;
   }
   if (!rep) {
-    const code = swing.lastRunCode
-      || (store.data.apex_swing.courseReplay || {})[swing.courseName];
+    const code = swing.lastRunCode || runs.get(swing.courseName);
     rep = code && decodeReplay(code);
   }
   if (!rep) { flash('PLAY A RUN FIRST', COLORS.BAD); return; }
@@ -3166,17 +3311,19 @@ const TRASH_SVG =
 
 function renderRunsList() {
   const as = store.data.apex_swing;
-  const reps = as.courseReplay || {};
-  const courses = Object.keys(reps).reverse();   // newest saved first
+  const records = runs.list();
   ui.runsList.textContent = '';
-  if (!courses.length) {
+  if (!records.length) {
     const empty = document.createElement('div');
     empty.id = 'runsEmpty';
-    empty.textContent = 'NO SAVED RUNS YET · SET A COURSE BEST';
+    empty.textContent = runs.ready
+      ? 'NO SAVED RUNS YET · SET A COURSE BEST'
+      : 'LOADING SAVED RUNS…';
     ui.runsList.appendChild(empty);
     return;
   }
-  for (const course of courses) {
+  for (const rec of records) {
+    const course = rec.course;
     const row = document.createElement('div');
     row.className = 'runRow';
     const name = document.createElement('div');
@@ -3184,12 +3331,12 @@ function renderRunsList() {
     name.textContent = course;
     const dist = document.createElement('div');
     dist.className = 'runDist';
-    dist.textContent = `${(as.courseBest || {})[course] || 0} m`;
+    dist.textContent = `${(as.courseBest || {})[course] || rec.dist || 0} m`;
     const watch = document.createElement('button');
     watch.className = 'runWatch'; watch.type = 'button'; watch.textContent = '▶';
     watch.addEventListener('pointerup', (e) => {
       e.stopPropagation();
-      const rep = decodeReplay(reps[course]);
+      const rep = decodeReplay(rec.code);
       if (!rep) { flash('RUN CODE UNREADABLE', COLORS.BAD); return; }
       rep.own = true;   // the player's saved run: its end-of-replay offer shares
       sfx.tick();
@@ -3207,8 +3354,7 @@ function renderRunsList() {
         return;
       }
       sfx.tick();
-      delete reps[course];                        // recording only — best stands
-      store.save();
+      runs.remove(course);        // the recording only — the best distance stands
       renderRunsList();
     });
     row.append(name, dist, watch, del);
@@ -3505,6 +3651,7 @@ function frame(now) {
    Boot
    ============================================================================ */
 store.load();
+runs.load();   // async: recordings arrive shortly after boot
 // Retire the old arcade/retro/toy theme names from any existing save.
 if (!THEMES.includes(store.data.settings.theme)) { store.data.settings.theme = 'rhythm'; store.save(); }
 updateSoundBtn();
@@ -3559,7 +3706,7 @@ window.__arcade = {
   state, swing, CONFIG, store,
   resetRun, grabRope, releaseRope, enterSwing,
   renderShareCard, shareScore, decodeReplay, playReplay,
-  encodeTrajectory, decodeTrajectory, shareRunText, courseLink,
+  encodeTrajectory, decodeTrajectory, shareRunText, courseLink, runs,
   recordReplayVideo, videoRec,
   extractReplay, showRunOffer, genTo, sectionAtM, native, sfx, THEMES, fs,
   view: () => ({ VS, VIEW_W, vsT }),
