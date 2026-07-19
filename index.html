@@ -463,6 +463,8 @@ const CONFIG = {
     // these snapshots, so floating-point / screen-size drift between devices
     // can never compound into a different run.
     CHECKPOINT_TICKS: 120,
+    GEN_AHEAD: 2600,       // px of course generated ahead of the avatar —
+                           // viewport-independent on purpose (see genTo call)
   },
 
   // abstract industrial neon — deliberately nothing organic
@@ -531,7 +533,13 @@ const native = (() => {
   const plug = (name) => {
     try { return (cap.Plugins && cap.Plugins[name]) || null; } catch (e) { return null; }
   };
-  return { on: true, Haptics: plug('Haptics'), Share: plug('Share'), Filesystem: plug('Filesystem'), App: plug('App') };
+  return {
+    on: true, Haptics: plug('Haptics'), Share: plug('Share'),
+    Filesystem: plug('Filesystem'), App: plug('App'),
+    // POC (iOS only): OS screen recording — the video never crosses the JS
+    // bridge, and Apple's own preview/trim/share UI ends the flow.
+    ReplayKit: plug('ReplayKitRecorder'), StatusBar: plug('StatusBar'),
+  };
 })();
 
 // Watch-only viewer: the App Links host serves replay spectating plus store
@@ -1223,8 +1231,9 @@ function resetRun() {
   swing.section = 1; swing.nextGateM = sectionEndM(1);
   swing.lastPegY = S.SIM_H * 0.32;
   swing.acted = false; swing.awaitTap = false;
-  swing.tick = 0; swing.recording = []; swing.checkpoints = [];
-  swing.replay = null; swing.replaySource = null;
+  swing.tick = 0;
+  swing.traj = { samples: [], events: [] };   // what actually happened
+  swing.replay = null; swing.replaySource = null; swing.trajPlay = null;
   swing.pendingWreck = null;
   rhythmStep = 0;   // RHYTHM theme: fresh melodic phrase each attempt
   swing.avatar = Bodies.polygon(S.START_X, S.SIM_H * 0.32, 5, S.AVATAR_R, {
@@ -1232,7 +1241,12 @@ function resetRun() {
   });
   Body.setVelocity(swing.avatar, { x: 3, y: -1 });
   Composite.add(engine.world, swing.avatar);
-  genTo(swing.camX + VIEW_W * 2);
+  // World generation must NOT depend on the viewport: a wider screen used to
+  // generate further ahead, consuming the course RNG on a different tick and
+  // making the same run diverge between aspects. The horizon is now a fixed
+  // world-space lookahead from the avatar (GEN_AHEAD), so course content is a
+  // pure function of the seed on every device.
+  genTo((swing.avatar ? swing.avatar.position.x : swing.camX) + CONFIG.SWING.GEN_AHEAD);
 }
 
 // Cumulative metres at the end of section n: each section grows by
@@ -1352,7 +1366,7 @@ function grabRope() {
   });
   swing.ropePeg = peg;
   Composite.add(engine.world, swing.rope);
-  if (!swing.replay) swing.recording.push(swing.tick);   // replay clock
+  if (!swing.replay) swing.traj.events.push({ t: swing.tick, peg: { x: peg.x, y: peg.y } });
   sfx.attach();
   haptic('tick');
 }
@@ -1362,7 +1376,7 @@ function releaseRope() {
   Composite.remove(engine.world, swing.rope);
   swing.rope = null;
   swing.ropePeg = null;
-  if (!swing.replay) swing.recording.push(swing.tick);
+  if (!swing.replay) swing.traj.events.push({ t: swing.tick, peg: null });
   sfx.release();
 }
 
@@ -1400,8 +1414,6 @@ function hitsHazard(bounds) {
 function swingDie() {
   const S = CONFIG.SWING;
   const p = swing.avatar.position;
-  // final ground-truth snapshot: playback wrecks at exactly this tick & spot
-  if (!swing.replay) pushCheckpoint();
   for (let i = 0; i < 26; i++) {
     const ang = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 320;
     state.particles.push({
@@ -1425,7 +1437,7 @@ function swingDie() {
   if (swing.replay) {
     swing.deadTimer = S.RESET_DELAY;
     sfx.fall(); sfx.wreck();
-    flash('REPLAY OVER', COLORS.BIN);
+    if (!videoRec.active) flash('REPLAY OVER', COLORS.BIN);   // not into the video
     return;
   }
 
@@ -1453,7 +1465,7 @@ function swingDie() {
   if (courses.length > 40) delete as.courseBest[courses[0]];   // keep the map small
   // every run is recordable-as-video until the next one starts; the run
   // that set the course best also becomes its shareable replay
-  const code = encodeReplay(m);
+  const code = encodeTrajectory(m);   // TR1: the recorded path, not the inputs
   swing.lastRunCode = code;
   if (m > prev) {
     as.courseReplay = as.courseReplay || {};
@@ -1510,7 +1522,8 @@ function swingTick(dt) {
     swing.deadTimer -= dt;
     if (swing.deadTimer <= 0) {
       if (swing.replay) {
-        if (videoRec.active && videoRec.onReplayEnd) videoRec.onReplayEnd();
+        if (videoRec.nativeStop) videoRec.nativeStop();   // ReplayKit POC
+        else if (videoRec.active && videoRec.onReplayEnd) videoRec.onReplayEnd();
         else showReplayOffer();             // replay finished: ask what next
       } else if (swing.pendingWreck) {
         const info = swing.pendingWreck;
@@ -1547,6 +1560,11 @@ function swingTick(dt) {
   let wantHold;
   if (swing.replay) {
     const r = swing.replay;
+    if (swing.trajPlay) {                 // trajectory: draw the recorded path
+      applyTrajectoryTick();
+      if (swing.tick >= swing.trajPlay.endTick) { swingDie(); return; }
+      wantHold = !!swing.rope;            // keep grab/release below a no-op
+    } else {
     // snap to any ground-truth checkpoint due at this tick: resimulation
     // drift (screen size, cross-browser float rounding) is corrected before
     // it can compound into a different run
@@ -1563,14 +1581,23 @@ function swingTick(dt) {
       r.idx++;
     }
     wantHold = r.hold;
+    }
   } else {
-    if (swing.tick > 0 && swing.tick % S.CHECKPOINT_TICKS === 0) pushCheckpoint();
+    // record the trajectory: this state, this tick (rope changes are logged
+    // as events by grabRope/releaseRope below)
+    const ang = a.angle || 0;
+    swing.traj.samples.push({ x: a.position.x, y: a.position.y, a: ang });
     wantHold = swing.holdId !== null || swing.keyHold;
   }
   if (wantHold && !swing.rope) grabRope();
   else if (!wantHold && swing.rope) releaseRope();
 
-  genTo(swing.camX + VIEW_W * 2);
+  // World generation must NOT depend on the viewport: a wider screen used to
+  // generate further ahead, consuming the course RNG on a different tick and
+  // making the same run diverge between aspects. The horizon is now a fixed
+  // world-space lookahead from the avatar (GEN_AHEAD), so course content is a
+  // pure function of the seed on every device.
+  genTo((swing.avatar ? swing.avatar.position.x : swing.camX) + CONFIG.SWING.GEN_AHEAD);
   while (swing.pegs.length && swing.pegs[0].x < swing.camX - 300) swing.pegs.shift();
   while (swing.hazards.length && swing.hazards[0].x + swing.hazards[0].w < swing.camX - 300) {
     swing.hazards.shift();
@@ -1626,7 +1653,7 @@ function swingTick(dt) {
   // style) and kicks a stalled pendulum forward, so bottoming out on a grab
   // never strands the player. The winch reels the rope in while held, adding
   // energy the way a skater pulls their arms in.
-  if (swing.rope && swing.ropePeg) {
+  if (swing.rope && swing.ropePeg && !swing.trajPlay) {   // no forces in playback
     const peg = swing.ropePeg;
     const rx = a.position.x - peg.x, ry = a.position.y - peg.y;
     const rl = Math.hypot(rx, ry) || 1;
@@ -1688,7 +1715,7 @@ function swingTick(dt) {
   // (checked above) is the truth, and the camera kill line depends on the
   // viewer's screen width, which must never end someone else's run early.
   const serene = store.data.settings.difficulty === 'serene';
-  const cinematic = swing.replay && swing.replay.endTick !== null;
+  const cinematic = swing.trajPlay || (swing.replay && swing.replay.endTick !== null);
   if (!cinematic &&
       (a.position.y > S.SIM_H - S.SPIKE_H - 2 ||   // kill floor
        a.position.x < swing.camX - S.KILL_MARGIN || // fell behind the camera
@@ -2017,19 +2044,6 @@ function updateSwingHud() {
   ui.vol.textContent = `BEST ${best} m`;
 }
 
-// Live-run snapshot of the avatar state, quantized for compact encoding.
-// Playback snaps to these, so replays can't drift from the recorded truth.
-function pushCheckpoint() {
-  const a = swing.avatar;
-  if (!a) return;
-  swing.checkpoints.push({
-    t: swing.tick,
-    x: Math.round(a.position.x), y: Math.round(a.position.y),
-    vx: Math.round(a.velocity.x * 10), vy: Math.round(a.velocity.y * 10),
-    len: swing.rope ? Math.round(swing.rope.length) : 0,
-  });
-}
-
 // zigzag: signed int -> non-negative, so base36 stays sign-free
 const zigzag = (v) => (v < 0 ? -2 * v - 1 : 2 * v);
 const unzigzag = (n) => (n & 1) ? -(n + 1) / 2 : n / 2;
@@ -2037,27 +2051,169 @@ const unzigzag = (n) => (n & 1) ? -(n + 1) / 2 : n / 2;
 // PA2:<course>:<dist>:<event tick deltas>:<end tick>:<checkpoints>
 // Checkpoint fields (base36, '.'-joined, ','-separated): tick delta, x delta
 // (zigzag), y (zigzag), vx*10 (zigzag), vy*10 (zigzag), rope length (0 = free).
-function encodeReplay(dist) {
-  let prev = 0;
-  const parts = swing.recording.map(t => {
-    const d = t - prev;
-    prev = t;
-    return d.toString(36);
-  });
-  let pt = 0, px = 0;
-  const cps = swing.checkpoints.map(c => {
-    const s = [
-      (c.t - pt).toString(36),
-      zigzag(c.x - px).toString(36),
-      zigzag(c.y).toString(36),
-      zigzag(c.vx).toString(36),
-      zigzag(c.vy).toString(36),
-      Math.max(0, c.len).toString(36),
-    ].join('.');
-    pt = c.t; px = c.x;
-    return s;
-  });
-  return `PA2:${swing.courseName}:${dist}:${parts.join('.')}:${swing.tick.toString(36)}:${cps.join(',')}`;
+/* ============================================================================
+   Trajectory replays (TR1) — we record WHAT HAPPENED, not what was pressed.
+   Playback runs no physics at all: it draws the recorded path. That makes a
+   replay identical on every device, aspect and browser, immune to future
+   physics tuning, and exact for video — none of which input-replay could
+   promise, because re-simulation demanded bit-identical determinism.
+   ============================================================================ */
+const TRAJ = {
+  POS_Q: 4,        // position quantum: 1/4 px
+  ANG_Q: 128 / Math.PI,   // angle quantum: ~0.7 degrees
+};
+
+// varint + zigzag over a plain byte array, then base64url. Deltas are small
+// (a tick moves a handful of pixels), so most values cost a single byte.
+function putVarint(bytes, n) {
+  let v = n >>> 0;
+  while (v > 0x7f) { bytes.push((v & 0x7f) | 0x80); v >>>= 7; }
+  bytes.push(v);
+}
+function readVarint(bytes, cur) {
+  let v = 0, shift = 0, b;
+  do { b = bytes[cur.i++]; v |= (b & 0x7f) << shift; shift += 7; } while (b & 0x80);
+  return v >>> 0;
+}
+const zz = (n) => (n < 0 ? -2 * n - 1 : 2 * n);
+const unzz = (n) => (n & 1 ? -(n + 1) / 2 : n / 2);
+
+function bytesToB64url(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 4096) {
+    s += String.fromCharCode.apply(null, bytes.slice(i, i + 4096));
+  }
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlToBytes(s) {
+  const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// TR1:<course>:<dist>:<stride>:<base64url samples+events>
+// stride 1 = every tick (local archive); >1 = decimated for a link, with
+// playback interpolating between samples.
+function encodeTrajectory(dist, stride = 1) {
+  const samples = swing.traj.samples, events = swing.traj.events;
+  const bytes = [];
+  const kept = [];
+  for (let i = 0; i < samples.length; i += stride) kept.push(samples[i]);
+  // always land the final sample so the wreck frame is exact
+  if (samples.length && kept[kept.length - 1] !== samples[samples.length - 1]) {
+    kept.push(samples[samples.length - 1]);
+  }
+  putVarint(bytes, kept.length);
+  let px = 0, py = 0, pa = 0;
+  for (const s of kept) {
+    const x = Math.round(s.x * TRAJ.POS_Q), y = Math.round(s.y * TRAJ.POS_Q);
+    const a = Math.round(s.a * TRAJ.ANG_Q);
+    putVarint(bytes, zz(x - px)); putVarint(bytes, zz(y - py)); putVarint(bytes, zz(a - pa));
+    px = x; py = y; pa = a;
+  }
+  putVarint(bytes, events.length);
+  let pt = 0, ex = 0, ey = 0;
+  for (const e of events) {
+    putVarint(bytes, e.t - pt);
+    putVarint(bytes, e.peg ? 1 : 0);
+    if (e.peg) {
+      const x = Math.round(e.peg.x), y = Math.round(e.peg.y);
+      putVarint(bytes, zz(x - ex)); putVarint(bytes, zz(y - ey));
+      ex = x; ey = y;
+    }
+    pt = e.t;
+  }
+  return `TR1:${swing.courseName}:${dist}:${stride}:${bytesToB64url(bytes)}`;
+}
+
+// Drives the avatar from the recording for one tick. No forces, no solver:
+// position, angle and rope anchor are simply set. Between decimated samples
+// the path is interpolated, so a link-sized recording still looks smooth.
+function applyTrajectoryTick() {
+  const tp = swing.trajPlay, a = swing.avatar;
+  if (!a) return;
+  const t = swing.tick, stride = tp.stride;
+  const i = Math.min(tp.samples.length - 1, Math.floor(t / stride));
+  const s = tp.samples[i];
+  const nx = tp.samples[Math.min(tp.samples.length - 1, i + 1)];
+  const f = stride > 1 ? (t % stride) / stride : 0;
+  let x, y, ang;
+  if (f === 0) { x = s.x; y = s.y; ang = s.a; }
+  else {
+    // Catmull-Rom through the neighbouring samples: a swing arc curves too
+    // hard for straight lines between decimated samples (measured ~17px of
+    // chord error at 20Hz; the spline brings it back under a pixel).
+    const p0 = tp.samples[Math.max(0, i - 1)];
+    const p3 = tp.samples[Math.min(tp.samples.length - 1, i + 2)];
+    const cr = (a0, a1, a2, a3) => 0.5 * ((2 * a1) + (-a0 + a2) * f +
+      (2 * a0 - 5 * a1 + 4 * a2 - a3) * f * f +
+      (-a0 + 3 * a1 - 3 * a2 + a3) * f * f * f);
+    x = cr(p0.x, s.x, nx.x, p3.x);
+    y = cr(p0.y, s.y, nx.y, p3.y);
+    ang = cr(p0.a, s.a, nx.a, p3.a);
+  }
+  // velocity is only read by the pose/camera; derive it from the path
+  Body.setPosition(a, { x, y });
+  Body.setAngle(a, ang);
+  a.velocity.x = (nx.x - s.x) / stride;
+  a.velocity.y = (nx.y - s.y) / stride;
+  a.speed = Math.hypot(a.velocity.x, a.velocity.y);
+
+  while (tp.evIdx < tp.events.length && tp.events[tp.evIdx].t <= t) {
+    const e = tp.events[tp.evIdx++];
+    if (swing.rope) releaseRope();
+    if (e.peg) {
+      swing.ropePeg = e.peg;
+      swing.rope = Constraint.create({
+        bodyA: a, pointB: { x: e.peg.x, y: e.peg.y },
+        length: Math.hypot(e.peg.x - x, e.peg.y - y),
+        stiffness: CONFIG.SWING.ROPE_STIFFNESS, damping: 0,
+      });
+      Composite.add(engine.world, swing.rope);
+      sfx.attach();
+    }
+  }
+  if (swing.rope) {   // keep the drawn rope taut to the recorded position
+    swing.rope.length = Math.hypot(swing.ropePeg.x - x, swing.ropePeg.y - y);
+  }
+}
+
+function decodeTrajectory(str) {
+  const m = /^TR1:(.+):(\d+):(\d+):([A-Za-z0-9\-_]+)$/.exec(String(str).trim());
+  if (!m) return null;
+  try {
+    const stride = parseInt(m[3], 10) || 1;
+    const bytes = b64urlToBytes(m[4]);
+    const cur = { i: 0 };
+    const n = readVarint(bytes, cur);
+    const samples = new Array(n);
+    let px = 0, py = 0, pa = 0;
+    for (let i = 0; i < n; i++) {
+      px += unzz(readVarint(bytes, cur));
+      py += unzz(readVarint(bytes, cur));
+      pa += unzz(readVarint(bytes, cur));
+      samples[i] = { x: px / TRAJ.POS_Q, y: py / TRAJ.POS_Q, a: pa / TRAJ.ANG_Q };
+    }
+    const ne = readVarint(bytes, cur);
+    const events = new Array(ne);
+    let pt = 0, ex = 0, ey = 0;
+    for (let i = 0; i < ne; i++) {
+      pt += readVarint(bytes, cur);
+      const has = readVarint(bytes, cur);
+      let peg = null;
+      if (has) {
+        ex += unzz(readVarint(bytes, cur));
+        ey += unzz(readVarint(bytes, cur));
+        peg = { x: ex, y: ey };
+      }
+      events[i] = { t: pt, peg };
+    }
+    return {
+      kind: 'traj', course: m[1], dist: +m[2], stride, samples, events,
+      endTick: (samples.length - 1) * stride,
+    };
+  } catch (e) { return null; }
 }
 
 function parseTickList(str) {
@@ -2076,6 +2232,7 @@ function parseTickList(str) {
 
 function decodeReplay(str) {
   const s = String(str).trim();
+  if (/^TR1:/.test(s)) return decodeTrajectory(s);   // trajectory replay
   // legacy input-only codes still play (best-effort resimulation)
   let m = /^PA1:(.+):(\d+):([0-9a-z.]*)$/.exec(s);
   if (m) {
@@ -2108,6 +2265,19 @@ function playReplay(rep) {
   store.data.apex_swing.course = rep.course;
   store.save();
   enterSwing();          // (re)start on the replay's course, then hand to playback
+  if (rep.kind === 'traj') {
+    // physics off: the avatar is driven along the recorded path
+    Body.setStatic(swing.avatar, true);
+    swing.trajPlay = {
+      samples: rep.samples, events: rep.events, stride: rep.stride,
+      endTick: rep.endTick, evIdx: 0,
+    };
+    swing.replay = { ticks: [], idx: 0, hold: false, endTick: rep.endTick, cps: [], cpIdx: 0 };
+    swing.replaySource = rep;
+    swing.acted = true;
+    flash(`REPLAY · ${rep.dist} m RUN · TAP FOR OPTIONS`, COLORS.BIN, 9999999);
+    return;
+  }
   swing.replay = {
     ticks: rep.ticks, idx: 0, hold: false,
     endTick: rep.endTick == null ? null : rep.endTick,
@@ -2121,6 +2291,7 @@ function playReplay(rep) {
 // End a shared-run replay (finished or exited early): park the sim and offer
 // WATCH AGAIN / PLAY COURSE / LATER instead of launching a fresh game.
 function showReplayOffer() {
+  if (videoRec.active) return;   // a recording owns the screen
   const rep = swing.replaySource;
   swing.replay = null;
   ui.flash.classList.remove('show');
@@ -2177,6 +2348,9 @@ const videoRec = {
   onReplayEnd: null,  // armed by recordReplayVideo; fired by the deadTimer hook
   frame: null,        // { w, h } while recording: resize() renders at video size
   abort: null,        // armed by recordReplayVideo; a tap/space cancels the render
+  nativeStop: null,   // armed by the ReplayKit POC path; ends the OS recording
+  nativeOverlay: null, // { phase, t, rep } — cinematic drawn ON the live canvas
+                       // (ReplayKit records the screen, so branding must be on it)
 };
 
 const VIDEO_TUNE = {
@@ -2262,7 +2436,10 @@ function recordReplayVideo(rep, opts = {}) {
     // timing matches), so checkpoint snaps become no-ops and the motion is
     // exactly what the player saw. Upscale toward 1080p-class output —
     // pure render scaling, the world framing and physics are unchanged.
-    const vscale = Math.min(1920 / Math.max(W, H), 1080 / Math.min(W, H));
+    // Record at the device's real pixel density (was capped near 1080p, so
+    // phones recorded softer than they render). Bounded so a desktop window
+    // can't ask the encoder for something absurd.
+    const vscale = Math.min(Math.max(DPR, 1), 2400 / Math.max(W, H), 1600 / Math.min(W, H));
     const VW = Math.round(W * vscale);
     const VH = Math.round(H * vscale);
     const composite = document.createElement('canvas');
@@ -2284,8 +2461,10 @@ function recordReplayVideo(rep, opts = {}) {
       }
     } catch (e) { audioTap = null; }
     const parts = [];
+    // 12 Mbps: above every social platform's re-encode threshold (more is
+    // discarded, not delivered) while keeping the file share-friendly.
     const rec = new MediaRecorder(stream, {
-      mimeType: mime, videoBitsPerSecond: 8_000_000, audioBitsPerSecond: 128_000,
+      mimeType: mime, videoBitsPerSecond: 12_000_000, audioBitsPerSecond: 128_000,
     });
     rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
 
@@ -2418,15 +2597,27 @@ function b64urlDecode(s) {
   try { return atob(s.replace(/-/g, '+').replace(/_/g, '/')); } catch (e) { return ''; }
 }
 
-function runLink(course) {
-  const code = (store.data.apex_swing.courseReplay || {})[course];
-  if (!code) return null;
-  // Native apps serve from a local origin (https://localhost on Android), so
-  // location is never a link a recipient could open — always use SHARE_URL.
-  const base = (!native.on && /^https?:$/.test(location.protocol))
+// Native apps serve from a local origin (https://localhost on Android), so
+// location is never a link a recipient could open — always use SHARE_URL.
+function shareBase() {
+  return (!native.on && /^https?:$/.test(location.protocol))
     ? location.origin + location.pathname
     : CONFIG.SHARE_URL;
-  return `${base}#r=${b64urlEncode(code)}`;
+}
+
+// A shared link carries the COURSE, not the run: one tap loads the phrase so
+// a friend can play it. The run itself travels as the video — embedding a
+// trajectory produced kilobyte-long URLs that messengers mangle, and it was
+// redundant next to the footage.
+function courseLink(course) {
+  return `${shareBase()}?c=${encodeURIComponent(course)}`;
+}
+
+// Legacy: pre-trajectory links embedded the replay. Still parsed on open.
+function runLink(course) {
+  const code = (store.data.apex_swing.courseReplay || {})[course];
+  if (!code || code.length > 1200) return null;   // never build a mangled URL
+  return `${shareBase()}#r=${b64urlEncode(code)}`;
 }
 
 // Accepts a full deep link, a bare #r= fragment, or a raw PA1: code.
@@ -2438,7 +2629,7 @@ function extractReplay(str) {
     if (rep) return rep;
   }
   const raw = /PA[12]:.+$/i.exec(s);
-  return raw ? decodeReplay(raw[0].replace(/^pa(\d):/i, 'PA$1:')) : null;
+  return raw ? decodeReplay(raw[0].replace(/^pa(\d):/i, 'PA$1:').replace(/^tr1:/i, 'TR1:')) : null;
 }
 
 let pendingRunOffer = null;
@@ -2449,6 +2640,22 @@ function showRunOffer(rep) {
   const own = !!rep.own && !VIEWER;
   ui.runOfferShare.classList.toggle('hidden', !own);
   ui.runOffer.classList.remove('hidden');
+}
+
+// ?c=<phrase> — a shared course link: load it so TAP TO PLAY starts on the
+// friend's course, no typing. Returns true when it handled the URL.
+function checkSharedCourseLink(url) {
+  const m = /[?&]c=([^&#]+)/.exec(url || location.search || '');
+  if (!m) return false;
+  let phrase = '';
+  try { phrase = decodeURIComponent(m[1].replace(/\+/g, ' ')).trim(); } catch (e) { return false; }
+  if (!phrase) return false;
+  store.data.apex_swing.course = phrase;
+  store.save();
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  updateStart();
+  flash(`COURSE LOADED · ${phrase.toUpperCase()}`, COLORS.GOOD, 2600);
+  return true;
 }
 
 function checkSharedRunLink() {
@@ -2464,10 +2671,11 @@ function checkSharedRunLink() {
   showRunOffer(rep);
 }
 
+// Copies the COURSE link. Trajectory recordings are kilobytes — far too big
+// for a URL — so the run travels as video and the link carries the challenge.
 function copyRunCode(course) {
-  const link = runLink(course);
-  if (!link) { flash('NO SAVED RUN FOR THIS COURSE', COLORS.BAD); return; }
-  const done = () => flash('RUN LINK COPIED · SEND IT', COLORS.GOOD);
+  const link = courseLink(course);
+  const done = () => flash('COURSE LINK COPIED · SEND IT', COLORS.GOOD);
   try {
     navigator.clipboard.writeText(link).then(done, () => {
       ui.seedInput.value = link;   // fallback: surface it for manual copy
@@ -2583,10 +2791,7 @@ function renderShareCard() {
 // The one share sentence, for any course — the card, the video, and the
 // run-offer SHARE RUN all speak with the same voice.
 function shareRunText(course, best) {
-  const link = runLink(course);
-  return link
-    ? `${best} m on “${course}” in Apex Swing — open this link to WATCH my run, then beat it: ${link}`
-    : `${best} m on “${course}” in Apex Swing — type the phrase, beat my distance: ${CONFIG.SHARE_URL}`;
+  return `${best} m on “${course}” in Apex Swing — tap to play the same course and beat it: ${courseLink(course)}`;
 }
 
 function shareText() {
@@ -2693,10 +2898,91 @@ async function shareVideoFile({ blob, mime }) {
   flash('VIDEO SAVED · LINK COPIED', COLORS.GOOD, 2000);
 }
 
+// POC: ReplayKit path — iOS records the screen itself while the replay
+// plays, then presents Apple's preview (trim / save / share). No canvas
+// capture, no base64 bridge hop, no intro/outro compositing.
+// Drawn after the world each frame while ReplayKit is capturing: the intro
+// card, the persistent watermark, and the outro CTA — the same cinematic the
+// canvas path composites offscreen, except here it must be on the real
+// screen for the OS recorder to see it (the player watches it too).
+function drawNativeOverlay() {
+  const o = videoRec.nativeOverlay;
+  if (!o) return;
+  const T = VIDEO_TUNE, now = performance.now();
+  drawVideoWatermark(ctx, W, H);
+  if (o.phase === 'intro') {
+    const elapsed = now - o.t;
+    drawVideoIntro(ctx, W, H, o.rep, Math.max(0, Math.min(1, (T.INTRO_S * 1000 - elapsed) / 300)));
+    if (elapsed >= T.INTRO_S * 1000) { o.phase = 'run'; videoRec.timeScale = 1; }
+  } else if (o.phase === 'outro') {
+    drawVideoOutro(ctx, W, H, Math.min(1, (now - o.t) / 400));
+  }
+}
+
+function startVideoShareNative(rep) {
+  ui.wreckCard.classList.add('hidden');
+  ui.runOffer.classList.add('hidden');
+  closeMenu();
+  swing.awaitTap = false;
+  const T = VIDEO_TUNE;
+  let step = 'START', lastUri = null;
+  const cleanup = () => {
+    videoRec.active = false; videoRec.timeScale = 1;
+    videoRec.nativeStop = null; videoRec.nativeOverlay = null;
+    if (native.StatusBar) { try { native.StatusBar.show(); } catch (e) {} }
+  };
+  native.ReplayKit.start().then(() => {
+    // status bar out of frame; videoRec.active hides the HUD via enterSwing
+    if (native.StatusBar) { try { native.StatusBar.hide(); } catch (e) {} }
+    videoRec.active = true;
+    videoRec.timeScale = 0;   // world frozen behind the intro card
+    videoRec.nativeOverlay = { phase: 'intro', t: performance.now(), rep };
+    playReplay(rep);
+    // ReplayKit captures the screen: the game's own chrome must be off it
+    ui.flash.classList.remove('show');
+    ui.hud.classList.add('hidden');
+    return new Promise((resolve) => {
+      videoRec.nativeStop = () => {      // replay ended, or a tap stopped it
+        videoRec.nativeStop = null;
+        videoRec.timeScale = 0;          // hold the last frame under the CTA
+        swing.deadTimer = 1e9;           // park: without this the next tick in
+                                         // the same frame re-enters the branch
+                                         // and pops the end-of-replay dialog
+        const o = videoRec.nativeOverlay;
+        if (o) { o.phase = 'outro'; o.t = performance.now(); }
+        setTimeout(resolve, T.OUTRO_S * 1000);
+      };
+    });
+  }).then(() => { step = 'STOP'; return native.ReplayKit.stopWithOutput(); })
+    .then((res) => {
+      cleanup();
+      step = 'SHARE';
+      lastUri = res && res.uri;
+      if (!native.Share) throw new Error('share plugin missing');
+      if (!lastUri) throw new Error('no file uri');
+      const best = (store.data.apex_swing.courseBest || {})[rep.course] || rep.dist;
+      // let the recorder's teardown finish before presenting UI over it
+      return new Promise((r) => setTimeout(r, 350)).then(() => native.Share.share({
+        text: shareRunText(rep.course, best),
+        files: [lastUri],
+        dialogTitle: 'Share your run',
+      }));
+    })
+    .then(() => returnToStart())
+    .catch((e) => {
+      cleanup();
+      const msg = String((e && (e.message || e.errorMessage || e)) || 'unknown');
+      if (/cancel/i.test(msg)) { returnToStart(); return; }
+      // POC: keep the failure on screen long enough to read it
+      flash(`${step} FAILED · ${msg.toUpperCase().slice(0, 60)}`, COLORS.BAD, 15000);
+      setTimeout(returnToStart, 15000);
+    });
+}
+
 function startVideoShare(rep) {
   // Check support BEFORE dismantling the UI: an unsupported browser should
   // leave the player exactly where they were, card intact.
-  if (!pickVideoMime() || !document.createElement('canvas').captureStream) {
+  if (!native.ReplayKit && (!pickVideoMime() || !document.createElement('canvas').captureStream)) {
     flash('VIDEO NOT SUPPORTED HERE', COLORS.BAD);
     return;
   }
@@ -2706,6 +2992,7 @@ function startVideoShare(rep) {
     rep = code && decodeReplay(code);
   }
   if (!rep) { flash('PLAY A RUN FIRST', COLORS.BAD); return; }
+  if (native.ReplayKit) { startVideoShareNative(rep); return; }
   ui.wreckCard.classList.add('hidden');
   ui.runOffer.classList.add('hidden');
   closeMenu();
@@ -2772,6 +3059,7 @@ function applyCourse(phrase) {
    ============================================================================ */
 canvas.addEventListener('pointerdown', (e) => {
   audio.unlock();
+  if (videoRec.nativeStop) { videoRec.nativeStop(); return; }   // stop early
   if (videoRec.active) {   // rendering a video: a tap cancels the render
     if (videoRec.abort) videoRec.abort();
     return;
@@ -2830,6 +3118,7 @@ function simPaused() {
 window.addEventListener('keydown', (e) => {
   if (e.target && e.target.tagName === 'INPUT') return;   // typing a seed phrase
   if (e.key !== ' ') return;
+  if (videoRec.nativeStop) { videoRec.nativeStop(); return; }   // stop early
   if (videoRec.active) {   // rendering a video: space cancels the render
     if (videoRec.abort) videoRec.abort();
     return;
@@ -3241,6 +3530,7 @@ function frame(now) {
   if (steps >= 4) acc = 0;
   if (started) swingRender();
   else if (gridCache) ctx.drawImage(gridCache, 0, 0, W, H);
+  if (videoRec.nativeOverlay) drawNativeOverlay();   // ReplayKit cinematic
 }
 
 /* ============================================================================
@@ -3278,12 +3568,13 @@ if (VIEWER) {
   });
 }
 
-checkSharedRunLink();   // opened via a shared run deep link?
+checkSharedCourseLink() || checkSharedRunLink();   // opened via a shared link?
 // Native: App Links hand the URL to the app instead of the page location —
 // on a cold start via getLaunchUrl, warm (app already running) via appUrlOpen.
 if (native.on && native.App) {
   const offerFromUrl = (url) => {
     if (!url) return;
+    if (checkSharedCourseLink(url)) return;   // ?c= course link
     const rep = extractReplay(url);
     if (rep) showRunOffer(rep);
     else if (/[#&?]r=/.test(url)) flash('RUN LINK UNREADABLE — GET THE FULL LINK', COLORS.BAD, 2400);
@@ -3299,7 +3590,8 @@ requestAnimationFrame(frame);
 window.__arcade = {
   state, swing, CONFIG, store,
   resetRun, grabRope, releaseRope, enterSwing,
-  renderShareCard, shareScore, encodeReplay, decodeReplay, playReplay,
+  renderShareCard, shareScore, decodeReplay, playReplay,
+  encodeTrajectory, decodeTrajectory, shareRunText, courseLink,
   recordReplayVideo, videoRec,
   extractReplay, runLink, showRunOffer, genTo, sectionAtM, native, sfx, THEMES, fs,
   view: () => ({ VS, VIEW_W, vsT }),
