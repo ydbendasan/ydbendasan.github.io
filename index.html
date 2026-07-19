@@ -1399,7 +1399,8 @@ function swingTick(dt) {
     swing.deadTimer -= dt;
     if (swing.deadTimer <= 0) {
       if (swing.replay) {
-        showReplayOffer();                  // replay finished: ask what next
+        if (videoRec.active && videoRec.onReplayEnd) videoRec.onReplayEnd();
+        else showReplayOffer();             // replay finished: ask what next
       } else if (swing.pendingBestShare) {
         swing.pendingBestShare = false;
         showBestPrompt();                   // new best: offer to share the run
@@ -1689,6 +1690,34 @@ function swingRender() {
 }
 
 /* ---- stick figure: pose derived from physics state, no extra bodies ---- */
+// Jetpack — the visible story for the sim's pump force (render-only; the
+// physics is untouched). The figure wears a small pack that fires thruster
+// bursts, but only on pushes with a clear forward component and only while
+// the swing is weak: a dead hang gets an obvious full-power rescue burn, a
+// full-speed swing gets nothing, and the backstroke always reads as coasting.
+function jetState() {
+  if (!swing.rope || !swing.ropePeg || !swing.avatar) return { firing: false, power: 0 };
+  const S = CONFIG.SWING;
+  const p = swing.avatar.position, v = swing.avatar.velocity;
+  const speed = Math.hypot(v.x, v.y);
+  const rxs = p.x - swing.ropePeg.x, rys = p.y - swing.ropePeg.y;
+  const rl = Math.hypot(rxs, rys) || 1;
+  const tx = -rys / rl, ty = rxs / rl;
+  const vt = v.x * tx + v.y * ty;
+  const belowness = clamp(rys / rl, 0, 1);
+  const nearBottom = Math.abs(rxs) / rl < 0.2;
+  const dir = Math.abs(vt) > S.STALL_SPEED
+    ? Math.sign(vt)
+    : (nearBottom ? (tx >= 0 ? 1 : -1) : 0);
+  if (!dir || belowness <= 0.35 || speed >= S.PUMP_MAX_SPEED) return { firing: false, power: 0 };
+  if (tx * dir <= 0.3) return { firing: false, power: 0 };   // backstroke: coast
+  const deadness = 1 - speed / S.PUMP_MAX_SPEED;
+  if (deadness < 0.25) return { firing: false, power: 0 };   // strong swing: no help
+  // short pulsed burns rather than a continuous torch
+  const firing = (state.time % 0.5) < 0.32;
+  return { firing, power: deadness };
+}
+
 function stickPose() {
   const a = swing.avatar;
   const p = a.position, v = a.velocity;
@@ -1741,7 +1770,17 @@ function stickPose() {
       { x: sho.x + d2.x * 11, y: sho.y + d2.y * 11 },
     ];
   }
-  return { sho, hip, head, legs, hands, grip, speed };
+  // jetpack: mounted on the torso's back (the -x side, away from travel),
+  // exhaust pointing backward so its thrust reads as pushing him forward
+  let bnx = -uy, bny = ux;
+  if (bnx > 0) { bnx = -bnx; bny = -bny; }
+  const jet = jetState();
+  jet.x = (sho.x + hip.x) / 2 + bnx * 4.5;
+  jet.y = (sho.y + hip.y) / 2 + bny * 4.5;
+  jet.ax = bnx; jet.ay = bny;         // exhaust direction
+  jet.ux = ux; jet.uy = uy;           // torso axis (pack alignment)
+
+  return { sho, hip, head, legs, hands, grip, speed, jet };
 }
 
 function drawLasso(pose) {
@@ -1780,7 +1819,55 @@ function drawLasso(pose) {
   }
 }
 
+// One spark chance per sim tick (not per RAF), so exhaust density doesn't
+// depend on display refresh rate or the video time-warp.
+let jetSparkTick = -1;
+
+function drawJet(jet) {
+  ctx.save();
+  ctx.translate(jet.x, jet.y);
+  ctx.rotate(Math.atan2(jet.uy, jet.ux));
+  // the pack: a small canister aligned with the torso
+  ctx.fillStyle = '#35566b';
+  ctx.strokeStyle = rgba(COLORS.BIN, 0.55);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(-3.5, -2.6, 7, 5.2, 1.6);
+  else ctx.rect(-3.5, -2.6, 7, 5.2);
+  ctx.fill(); ctx.stroke();
+  ctx.restore();
+
+  if (!jet.firing) return;
+  // pulsed burn: white-hot core inside a neon flame, flickering per frame
+  const len = (9 + jet.power * 12) * (0.8 + Math.random() * 0.4);
+  const nx = jet.x + jet.ax * 3.2, ny = jet.y + jet.ay * 3.2;
+  const px = -jet.ay, py = jet.ax;   // flame width axis
+  for (const [w, l, col, al] of [[3.4, len, COLORS.BIN, 0.75], [1.6, len * 0.6, '#ffffff', 0.9]]) {
+    ctx.fillStyle = rgba(col, al);
+    ctx.beginPath();
+    ctx.moveTo(nx + px * w, ny + py * w);
+    ctx.lineTo(nx + jet.ax * l, ny + jet.ay * l);
+    ctx.lineTo(nx - px * w, ny - py * w);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // exhaust sparks drift backward off the flame tip — spawn keyed to sim
+  // ticks (not RAF) so density is identical at 60/120Hz and in slow-mo
+  if (swing.tick !== jetSparkTick) {
+    jetSparkTick = swing.tick;
+    if (Math.random() < 0.6) state.particles.push({
+      type: 'spark',
+      x: nx + jet.ax * len, y: ny + jet.ay * len,
+      vx: jet.ax * (70 + Math.random() * 50) + (Math.random() - 0.5) * 20,
+      vy: jet.ay * (70 + Math.random() * 50) + (Math.random() - 0.5) * 20,
+      grav: 0, size: 2.5, life: 0.22 + Math.random() * 0.12, max: 0.34,
+      color: COLORS.BIN,
+    });
+  }
+}
+
 function drawStick(pose) {
+  if (pose.jet) drawJet(pose.jet);
   const c = CONFIG.SWING.AVATAR_COLOR;
   ctx.strokeStyle = c;
   ctx.lineWidth = 2.4;
@@ -1955,6 +2042,241 @@ function returnToStart() {
   ui.start.classList.remove('hidden');
 }
 
+/* ============================================================================
+   Replay → video — renders a time-warped cinematic of a run into a portrait
+   (1080×1920) or landscape (1920×1080) video, entirely on-device: the replay
+   plays on the live canvas while an offscreen canvas re-frames each frame
+   around the action and MediaRecorder captures it. Recording is realtime, so
+   the player watches the cinematic while it renders. Phase 1: core renderer,
+   invoked via the debug handle; share UI, highlights, audio and the Android
+   MP4 remux come later.
+   ============================================================================ */
+const videoRec = {
+  active: false,
+  timeScale: 1,       // frame() multiplies dtMs by this while recording
+  onReplayEnd: null,  // armed by recordReplayVideo; fired by the deadTimer hook
+  frame: null,        // { w, h } while recording: resize() renders at video size
+  abort: null,        // armed by recordReplayVideo; a tap/space cancels the render
+};
+
+const VIDEO_TUNE = {
+  INTRO_S: 1.4,        // title card before the run starts
+  OUTRO_S: 1.6,        // CTA card over the frozen wreck
+  TARGET_BODY_S: 8,    // auto-fit: aim the sped-up body at roughly this length
+  SLOWMO_TICKS: 90,    // final 1.5s of the run play at slow-mo
+  SLOWMO_SCALE: 0.3,
+  MAX_SCALE: 3,        // frame() allows 4 ticks/RAF; 3 keeps arcs readable
+};
+
+function pickVideoMime() {
+  if (typeof MediaRecorder === 'undefined') return null;
+  return ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1.42E01E', 'video/mp4',
+          'video/webm;codecs=h264,opus', 'video/webm;codecs=h264',
+          'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp9', 'video/webm']
+    .find((m) => MediaRecorder.isTypeSupported(m)) || null;
+}
+
+function drawVideoIntro(g, VW, VH, rep, alpha) {
+  const mono = 'ui-monospace, Menlo, Consolas, monospace';
+  g.save();
+  g.globalAlpha = alpha;
+  g.fillStyle = COLORS.BG; g.fillRect(0, 0, VW, VH);
+  g.textAlign = 'center';
+  const s = VW / 1080;   // scale typography off the portrait reference
+  g.font = `800 ${Math.round(86 * s)}px ${mono}`;
+  const w1 = g.measureText('APEX ').width, w2 = g.measureText('SWING').width;
+  g.textAlign = 'left';
+  g.shadowColor = 'rgba(39,232,255,.75)'; g.shadowBlur = 30 * s;
+  g.fillStyle = '#ffffff'; g.fillText('APEX ', (VW - w1 - w2) / 2, VH * 0.4);
+  g.fillStyle = COLORS.BIN; g.fillText('SWING', (VW - w1 - w2) / 2 + w1, VH * 0.4);
+  g.shadowBlur = 0;
+  g.textAlign = 'center';
+  g.fillStyle = 'rgba(39,232,255,.85)'; g.font = `700 ${Math.round(40 * s)}px ${mono}`;
+  g.fillText(`“${rep.course}”`, VW / 2, VH * 0.5);
+  g.fillStyle = COLORS.GOOD; g.font = `800 ${Math.round(120 * s)}px ${mono}`;
+  g.shadowColor = 'rgba(182,255,46,.6)'; g.shadowBlur = 26 * s;
+  g.fillText(`${rep.dist} m`, VW / 2, VH * 0.62);
+  g.restore();
+}
+
+function drawVideoOutro(g, VW, VH, alpha) {
+  const mono = 'ui-monospace, Menlo, Consolas, monospace';
+  g.save();
+  g.globalAlpha = alpha * 0.78;
+  g.fillStyle = COLORS.BG; g.fillRect(0, 0, VW, VH);
+  g.globalAlpha = alpha;
+  g.textAlign = 'center';
+  const s = VW / 1080;
+  g.fillStyle = '#ffffff'; g.font = `800 ${Math.round(58 * s)}px ${mono}`;
+  g.fillText('BEAT MY DISTANCE', VW / 2, VH * 0.44);
+  g.fillStyle = COLORS.GOOD; g.font = `800 ${Math.round(58 * s)}px ${mono}`;
+  g.fillText('GET APEX SWING', VW / 2, VH * 0.52);
+  g.fillStyle = 'rgba(39,232,255,.9)'; g.font = `700 ${Math.round(40 * s)}px ${mono}`;
+  g.fillText(CONFIG.SHARE_URL.replace('https://', '').replace(/\/$/, ''), VW / 2, VH * 0.62);
+  g.restore();
+}
+
+function drawVideoWatermark(g, VW, VH) {
+  const mono = 'ui-monospace, Menlo, Consolas, monospace';
+  g.save();
+  g.textAlign = 'center';
+  g.globalAlpha = 0.55;
+  g.fillStyle = '#cfe9ff';
+  g.font = `700 ${Math.round(26 * (VW / 1080))}px ${mono}`;
+  g.fillText(CONFIG.SHARE_URL.replace('https://', '').replace(/\/$/, ''), VW / 2, VH - 28);
+  g.restore();
+}
+
+// Renders rep into a video Blob. opts.landscape picks 1920×1080 over the
+// default 1080×1920. Resolves { blob, mime, width, height, seconds }.
+function recordReplayVideo(rep, opts = {}) {
+  return new Promise((resolve, reject) => {
+    if (videoRec.active) { reject(new Error('already recording')); return; }
+    const mime = pickVideoMime();
+    if (!mime || !document.createElement('canvas').captureStream) {
+      reject(new Error('video capture unsupported here')); return;
+    }
+    const VW = opts.landscape ? 1920 : 1080;
+    const VH = opts.landscape ? 1080 : 1920;
+    const composite = document.createElement('canvas');
+    composite.width = VW; composite.height = VH;
+    const g = composite.getContext('2d');
+    // 30fps halves encoder load (fewer dropped frames on weak devices) at the
+    // cost of motion smoothness; the sim still steps at its full 60Hz.
+    const stream = composite.captureStream(opts.fps || 60);
+    // Mix the game's procedural audio into the recording — tapped off the
+    // master gain, so the video hears exactly what the player hears. Sound
+    // off (or a suspended context) simply yields a silent track.
+    let audioTap = null;
+    try {
+      audio.unlock();
+      if (audio.ctx && audio.master) {
+        audioTap = audio.ctx.createMediaStreamDestination();
+        audio.master.connect(audioTap);
+        for (const t of audioTap.stream.getAudioTracks()) stream.addTrack(t);
+      }
+    } catch (e) { audioTap = null; }
+    const parts = [];
+    const rec = new MediaRecorder(stream, {
+      mimeType: mime, videoBitsPerSecond: 8_000_000, audioBitsPerSecond: 128_000,
+    });
+    rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
+
+    // auto-fit the body speed: whole run (minus the slow-mo tail) in ~TARGET_BODY_S
+    const T = VIDEO_TUNE;
+    const runTicks = rep.endTick != null
+      ? rep.endTick
+      : (rep.ticks.length ? rep.ticks[rep.ticks.length - 1] + 240 : 600);
+    const bodyTicks = Math.max(0, runTicks - T.SLOWMO_TICKS);
+    // opts.realtime: plain 1x from start to wreck — no speed-up, no slow-mo
+    const baseScale = opts.realtime
+      ? 1
+      : Math.min(T.MAX_SCALE, Math.max(1, (bodyTicks / 60) / T.TARGET_BODY_S));
+
+    const t0 = performance.now();
+    let raf = 0;
+    let phase = 'intro';       // intro -> run -> outro
+    let phaseT = t0;
+    let settled = false;
+
+    // Undo every global the recording touched. Must be safe to call from any
+    // phase, including a setup failure where the RAF loop never started.
+    const teardown = () => {
+      videoRec.active = false; videoRec.timeScale = 1;
+      videoRec.onReplayEnd = null; videoRec.abort = null;
+      videoRec.frame = null;
+      cancelAnimationFrame(raf);
+      document.removeEventListener('visibilitychange', onHidden);
+      if (audioTap) { try { audio.master.disconnect(audioTap); } catch (e) {} }
+      resize();                // restore the on-screen viewport
+    };
+
+    // The single exit — normal outro completion, user abort (tap/space), a
+    // hidden tab, or a dead encoder all land here. Whatever footage exists
+    // is resolved; an empty recording rejects.
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      teardown();
+      const seconds = (performance.now() - t0) / 1000;
+      const wrap = () => {
+        if (parts.length) resolve({ blob: new Blob(parts, { type: mime }), mime, width: VW, height: VH, seconds });
+        else reject(new Error('recording produced no data'));
+      };
+      rec.onstop = wrap;
+      try { rec.stop(); } catch (e) { wrap(); }   // already stopped: keep the footage
+      showReplayOffer();       // hand the player back to the normal end-of-replay flow
+    };
+    videoRec.abort = settle;   // canvas tap / space cancels the render
+    const onHidden = () => { if (document.hidden) settle(); };   // no frozen segments
+
+    // The deadTimer branch calls this instead of showReplayOffer while recording.
+    videoRec.onReplayEnd = () => {
+      if (phase === 'outro') return;
+      phase = 'outro'; phaseT = performance.now();
+      videoRec.timeScale = 0;
+      swing.deadTimer = 1e9;   // park the corpse until the outro finishes
+    };
+
+    // Slow-mo starts SLOWMO_TICKS before the wreck, but never swallows more
+    // than the last 40% of a short run (endTick < 90 used to be all slow-mo).
+    const slowFrom = rep.endTick == null
+      ? Infinity
+      : Math.max(rep.endTick * 0.6, rep.endTick - T.SLOWMO_TICKS);
+
+    const frame = () => {
+      const now = performance.now();
+      if (now - t0 > 120000) { settle(); return; }   // watchdog: no endless renders
+      if (phase === 'intro' && now - phaseT >= T.INTRO_S * 1000) {
+        phase = 'run'; phaseT = now;
+      }
+      if (phase === 'run') {
+        const nearEnd = !opts.realtime && swing.tick >= slowFrom;
+        videoRec.timeScale = swing.dead ? 1 : nearEnd ? T.SLOWMO_SCALE : baseScale;
+      }
+
+      // the sim already renders at exactly VW×VH — copy 1:1, no cropping
+      g.drawImage(canvas, 0, 0);
+      drawVideoWatermark(g, VW, VH);
+
+      if (phase === 'intro') {
+        // hold the card, fading out over the last 300ms so the run cuts in
+        const a = Math.max(0, Math.min(1, (T.INTRO_S * 1000 - (now - phaseT)) / 300));
+        drawVideoIntro(g, VW, VH, rep, a);
+      } else if (phase === 'outro') {
+        const a = Math.min(1, (now - phaseT) / 400);
+        drawVideoOutro(g, VW, VH, a);
+        if (now - phaseT >= T.OUTRO_S * 1000) { settle(); return; }
+      }
+      raf = requestAnimationFrame(frame);
+    };
+
+    // Everything that mutates global state is guarded: a throw anywhere in
+    // here tears the hijacked viewport/flags back down instead of leaving
+    // the game input-dead and letterboxed.
+    try {
+      videoRec.active = true;
+      videoRec.timeScale = 0;  // world frozen behind the intro card
+      videoRec.frame = { w: VW, h: VH };
+      resize();                // sim now renders at the video's native size
+      rec.onerror = () => settle();   // dead encoder: keep what we have
+      rec.start(250);
+      // world starts frozen (timeScale 0): the intro card fades out onto the
+      // course's spawn frame, then the run phase releases time
+      playReplay(rep);
+      ui.flash.classList.remove('show');   // keep the capture clean
+      ui.hud.classList.add('hidden');      // the cinematic owns the screen
+      document.addEventListener('visibilitychange', onHidden);
+      raf = requestAnimationFrame(frame);
+    } catch (e) {
+      settled = true;
+      teardown();
+      try { rec.stop(); } catch (e2) {}
+      reject(e);
+    }
+  });
+}
+
 // Deep links: <game-url>#r=<base64url(PA1 code)>. Opening one offers
 // WATCH / PLAY with no typing. On the web the link targets the page's own
 // URL; in the native app it targets SHARE_URL — the App Links domain, so
@@ -2091,6 +2413,34 @@ function renderShareCard() {
   g.fillStyle = CONFIG.SWING.AVATAR_COLOR;
   g.beginPath(); g.arc(902, 420, 12, 0, 7); g.fill();
 
+  // jetpack on the torso's back, mid-burn — matches the in-game character.
+  // torso runs (892,436)->(882,474); back normal ≈ (-0.97,-0.25)
+  {
+    const nx = -0.966, ny = -0.254;
+    const jx = 887 + nx * 11, jy = 455 + ny * 11;
+    const noz = { x: jx + nx * 8, y: jy + ny * 8 };
+    for (const [w, l, col, al] of [[9, 34, COLORS.BIN, 0.8], [4.5, 20, '#ffffff', 0.9]]) {
+      g.fillStyle = rgba(col, al);
+      g.beginPath();
+      g.moveTo(noz.x - ny * w, noz.y + nx * w);
+      g.lineTo(noz.x + nx * l, noz.y + ny * l);
+      g.lineTo(noz.x + ny * w, noz.y - nx * w);
+      g.closePath(); g.fill();
+    }
+    g.fillStyle = rgba(COLORS.BIN, 0.7);
+    g.fillRect(jx + nx * 40 - 3, jy + ny * 40 - 3, 6, 6);
+    g.fillRect(jx + nx * 56 - 2, jy + ny * 56 + 8, 5, 5);
+    g.save();
+    g.translate(jx, jy);
+    g.rotate(Math.atan2(0.966, -0.254));   // torso axis angle
+    g.fillStyle = '#35566b';
+    g.strokeStyle = rgba(COLORS.BIN, 0.6); g.lineWidth = 2.5;
+    g.beginPath();
+    if (g.roundRect) g.roundRect(-9.5, -7, 19, 14, 4); else g.rect(-9.5, -7, 19, 14);
+    g.fill(); g.stroke();
+    g.restore();
+  }
+
   g.fillStyle = '#cfe9ff'; g.font = `700 36px ${mono}`;
   g.fillText('BEAT MY DISTANCE · GET APEX SWING', S / 2, 900);
   g.fillStyle = '#ffffff'; g.font = `700 40px ${mono}`;
@@ -2191,9 +2541,12 @@ function flash(text, color, ms = 950, big = false) {
    ============================================================================ */
 function enterSwing() {
   started = true;
-  fs.request();   // called from a user gesture on every path that starts a run
+  // Recording starts runs programmatically (no gesture): skip fullscreen —
+  // a silently-failing prefixed request would poison fs.want — and keep the
+  // HUD hidden so its buttons can't disturb the render mid-capture.
+  if (!videoRec.active) fs.request();   // else: user-gesture paths only
   ui.start.classList.add('hidden');
-  ui.hud.classList.remove('hidden');
+  if (!videoRec.active) ui.hud.classList.remove('hidden');
   swingHudLast = '';
   engine.gravity.y = CONFIG.SWING.GRAVITY_Y;
   swing.sessionBest = 0;
@@ -2225,6 +2578,10 @@ function applyCourse(phrase) {
    ============================================================================ */
 canvas.addEventListener('pointerdown', (e) => {
   audio.unlock();
+  if (videoRec.active) {   // rendering a video: a tap cancels the render
+    if (videoRec.abort) videoRec.abort();
+    return;
+  }
   if (fs.want) fs.request();   // rotation kicked us out: this tap re-enters
   if (!started) return;
   if (anyModalOpen()) return;   // a dialog owns input — its own buttons answer
@@ -2270,6 +2627,10 @@ function anyModalOpen() {
 window.addEventListener('keydown', (e) => {
   if (e.target && e.target.tagName === 'INPUT') return;   // typing a seed phrase
   if (e.key !== ' ') return;
+  if (videoRec.active) {   // rendering a video: space cancels the render
+    if (videoRec.abort) videoRec.abort();
+    return;
+  }
   if (anyModalOpen()) return;   // a dialog owns input
   if (!started) { if (VIEWER) return; audio.unlock(); enterSwing(); return; }
   if (swing.replay) { showReplayOffer(); return; }         // exit a replay -> options
@@ -2295,6 +2656,7 @@ ui.startPlay.addEventListener('pointerup', (e) => {
 
 ui.retry.addEventListener('pointerup', (e) => {
   e.stopPropagation();
+  if (videoRec.active) return;   // HUD is hidden while recording; belt-and-braces
   sfx.tick();
   swing.replay = null; swing.awaitTap = false;
   ui.flash.classList.remove('show');
@@ -2303,6 +2665,7 @@ ui.retry.addEventListener('pointerup', (e) => {
 
 ui.courseBtn.addEventListener('pointerup', (e) => {
   e.stopPropagation();
+  if (videoRec.active) return;
   sfx.tick();
   ui.seedInput.value = store.data.apex_swing.course || '';
   ui.seedModal.classList.remove('hidden');
@@ -2311,6 +2674,7 @@ ui.courseBtn.addEventListener('pointerup', (e) => {
 
 ui.watchBtn.addEventListener('pointerup', (e) => {
   e.stopPropagation();
+  if (videoRec.active) return;
   sfx.tick();
   const code = (store.data.apex_swing.courseReplay || {})[swing.courseName];
   const rep = code && decodeReplay(code);
@@ -2318,7 +2682,11 @@ ui.watchBtn.addEventListener('pointerup', (e) => {
   playReplay(rep);
 });
 
-ui.shareBtn.addEventListener('pointerup', (e) => { e.stopPropagation(); sfx.tick(); shareScore(); });
+ui.shareBtn.addEventListener('pointerup', (e) => {
+  e.stopPropagation();
+  if (videoRec.active) return;
+  sfx.tick(); shareScore();
+});
 
 function updateSoundBtn() {
   const on = store.data.settings.sound;
@@ -2367,7 +2735,11 @@ function toggleDifficulty() {
   flash(s.difficulty === 'serene' ? 'SERENE · JUST FLOW' : 'NORMAL · GO FOR A BEST',
         s.difficulty === 'serene' ? COLORS.BIN : COLORS.GOOD);
 }
-ui.modeBtn.addEventListener('pointerup', (e) => { e.stopPropagation(); toggleDifficulty(); });
+ui.modeBtn.addEventListener('pointerup', (e) => {
+  e.stopPropagation();
+  if (videoRec.active) return;
+  toggleDifficulty();
+});
 ui.startMode.addEventListener('pointerup', (e) => { e.stopPropagation(); toggleDifficulty(); });
 
 /* ---- new-best offer: SHARE the run or PLAY AGAIN ---- */
@@ -2440,14 +2812,38 @@ ui.runOfferLater.addEventListener('pointerup', () => {
    Resize / DPR — canvas backing store matches physical pixels
    ============================================================================ */
 function resize() {
-  DPR = Math.min(window.devicePixelRatio || 1, 3);
-  W = window.innerWidth;
-  H = window.innerHeight;
-  canvas.width = Math.round(W * DPR);
-  canvas.height = Math.round(H * DPR);
-  canvas.style.width = W + 'px';
-  canvas.style.height = H + 'px';
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (videoRec.frame) {
+    // Recording: the sim renders at the video's exact dimensions — the same
+    // native any-aspect framing a real device of that shape would get — and
+    // the oversized backing store is letterboxed into the window on screen.
+    const fw = videoRec.frame.w, fh = videoRec.frame.h;
+    const fit = Math.min(window.innerWidth / fw, window.innerHeight / fh);
+    canvas.style.width = Math.round(fw * fit) + 'px';
+    canvas.style.height = Math.round(fh * fit) + 'px';
+    canvas.style.left = Math.round((window.innerWidth - fw * fit) / 2) + 'px';
+    canvas.style.top = Math.round((window.innerHeight - fh * fit) / 2) + 'px';
+    // Window resizes mid-recording only move the letterbox: the backing
+    // store, zoom and grid are already at video size — rebuilding them would
+    // clear the live capture canvas (a blank captured frame) for nothing.
+    if (W === fw && H === fh) return;
+    DPR = 1;
+    W = fw;
+    H = fh;
+    canvas.width = W;
+    canvas.height = H;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  } else {
+    DPR = Math.min(window.devicePixelRatio || 1, 3);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    canvas.style.left = '';
+    canvas.style.top = '';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
   // Fullscreen survived this size change (e.g. rotation on browsers that keep
   // it): refresh the orientation snapshot so a LATER deliberate exit in the
   // new orientation isn't misread as a rotation-kick and force re-entered.
@@ -2456,7 +2852,7 @@ function resize() {
   // Cinematic reframe: mid-run size changes (rotation, fullscreen) glide the
   // zoom to its new value — a dolly-out revealing landscape's horizon, a dive
   // back into portrait's tight view. Menus and reduced-motion users snap.
-  if (started && Math.abs(vsTarget - VS) > 1e-4 &&
+  if (started && !videoRec.frame && Math.abs(vsTarget - VS) > 1e-4 &&
       !matchMedia('(prefers-reduced-motion: reduce)').matches) {
     vsFrom = VS; vsTo = vsTarget; vsT = 0;
   } else {
@@ -2487,6 +2883,7 @@ function frame(now) {
   let dtMs = now - last;
   last = now;
   if (dtMs > 100) dtMs = 100;   // tab-switch guard
+  if (videoRec.active) dtMs *= videoRec.timeScale;   // replay→video time-warp
   // advance the rotation zoom tween (~0.7s ease-in-out); VIEW_W tracks the
   // animated zoom so culling, generation and the camera glide along with it
   if (vsT < 1) {
@@ -2574,6 +2971,7 @@ window.__arcade = {
   state, swing, CONFIG, store,
   resetRun, grabRope, releaseRope, enterSwing,
   renderShareCard, shareScore, encodeReplay, decodeReplay, playReplay,
+  recordReplayVideo, videoRec,
   extractReplay, runLink, showRunOffer, genTo, sectionAtM, native, sfx, THEMES, fs,
   view: () => ({ VS, VIEW_W, vsT }),
   mode: () => started ? 'swing' : 'start',
