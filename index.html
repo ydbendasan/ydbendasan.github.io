@@ -2590,12 +2590,16 @@ function recordReplayVideo(rep, opts = {}) {
     // timing matches), so checkpoint snaps become no-ops and the motion is
     // exactly what the player saw. Upscale toward 1080p-class output —
     // pure render scaling, the world framing and physics are unchanged.
-    // Record at the device's real pixel density (was capped near 1080p, so
-    // phones recorded softer than they render). Bounded so a desktop window
-    // can't ask the encoder for something absurd.
-    const vscale = Math.min(Math.max(DPR, 1), 2400 / Math.max(W, H), 1600 / Math.min(W, H));
-    const VW = Math.round(W * vscale);
-    const VH = Math.round(H * vscale);
+    // Two hard constraints, both learned from a real Android encoder (a
+    // Samsung SM-T505) where breaking either yields a silent 0-byte file:
+    //   * stay within 1080p-class — 1200x1928 produced nothing, 1080x1920 fine
+    //   * even dimensions only — 1081x1734 produced nothing, 1080x1734 fine
+    // opts.cap lets the share flow retry smaller if a device refuses anyway.
+    const cap = opts.cap || 1920;
+    const vscale = Math.min(Math.max(DPR, 1),
+                            cap / Math.max(W, H), (cap * 9 / 16) / Math.min(W, H));
+    const VW = Math.max(2, Math.round(W * vscale / 2) * 2);
+    const VH = Math.max(2, Math.round(H * vscale / 2) * 2);
     const composite = document.createElement('canvas');
     composite.width = VW; composite.height = VH;
     const g = composite.getContext('2d');
@@ -2660,8 +2664,10 @@ function recordReplayVideo(rep, opts = {}) {
       teardown();
       const seconds = (performance.now() - t0) / 1000;
       const wrap = () => {
-        if (parts.length) resolve({ blob: new Blob(parts, { type: mime }), mime, width: VW, height: VH, seconds });
-        else reject(new Error('recording produced no data'));
+        if (parts.length) { resolve({ blob: new Blob(parts, { type: mime }), mime, width: VW, height: VH, seconds }); return; }
+        const err = new Error('recording produced no data');
+        err.code = 'EMPTY_RECORDING';   // callers retry on the code, not the text
+        reject(err);
       };
       rec.onstop = wrap;
       try { rec.stop(); } catch (e) { wrap(); }   // already stopped: keep the footage
@@ -2723,6 +2729,11 @@ function recordReplayVideo(rep, opts = {}) {
       resize();                // sim now renders at the video's native size
       rec.onerror = () => settle();   // dead encoder: keep what we have
       rec.start(250);
+    // Some encoders accept a frame size and then emit nothing (see the
+    // even-dimension / 1080p-class limits above). Chunks arrive every 250ms
+    // when it's working, so a few empty seconds means it never will —
+    // bail now instead of after a full replay.
+    setTimeout(() => { if (!settled && !parts.length) settle(); }, 4000);
       // world starts frozen (timeScale 0): the intro card fades out onto the
       // course's spawn frame, then the run phase releases time
       playReplay(rep);
@@ -2931,7 +2942,15 @@ function shareText() {
 function blobToBase64(blob) {
   return new Promise((res, rej) => {
     const r = new FileReader();
-    r.onload = () => res(String(r.result).split(',')[1] || '');
+    r.onload = () => {
+      // Split on the ';base64,' marker, NOT the first comma: an MP4 recorded
+      // with audio has a comma inside its own mime
+      // (data:video/mp4;codecs=avc1.42E01E,mp4a.40.2;base64,...), so the naive
+      // split handed the native layer 16 characters instead of the video.
+      const url = String(r.result);
+      const at = url.indexOf(';base64,');
+      res(at >= 0 ? url.slice(at + 8) : url.slice(url.lastIndexOf(',') + 1));
+    };
     r.onerror = rej;
     r.readAsDataURL(blob);
   });
@@ -3017,6 +3036,12 @@ async function shareVideoFile({ blob, mime }) {
   // reject (or hang headless). The app path above has no such rule; the
   // web gets the file saved plus the link copied for manual posting.
   try { await navigator.clipboard.writeText(text); } catch (e) { /* blocked */ }
+  if (native.on) {
+    // An <a download> does nothing inside a WebView: say what happened
+    // rather than pointing the player at a file that was never written.
+    flash('COULDN’T SHARE THE VIDEO', COLORS.BAD, 2600);
+    return;
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name;
@@ -3125,6 +3150,13 @@ function startVideoShare(rep) {
   swing.awaitTap = false;
   flash('RECORDING · TAP TO STOP EARLY', COLORS.BIN, 2200);
   recordReplayVideo(rep, { silentEnd: true })
+    .catch((e) => {
+      // Some encoders refuse a frame size without saying so (empty file).
+      // One retry at 720p-class before giving up.
+      if (!e || e.code !== 'EMPTY_RECORDING') throw e;
+      flash('RETRYING AT A SMALLER SIZE', COLORS.BIN, 2000);
+      return recordReplayVideo(rep, { silentEnd: true, cap: 1280 });
+    })
     .then((v) => shareVideoFile(v))
     .catch(() => flash('VIDEO RECORDING FAILED', COLORS.BAD))
     .then(() => returnToStart());
