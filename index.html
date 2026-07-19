@@ -661,6 +661,15 @@ const store = {
    Reads stay synchronous for callers via an in-memory mirror loaded at boot;
    writes update the mirror immediately and persist in the background.
    ============================================================================ */
+// Watching a recording (either kind) rather than playing. `swing.playback`
+// is the single source of truth: null while playing, otherwise
+//   { kind: 'traj',  endTick, samples, events, stride, evIdx }
+//   { kind: 'input', endTick, ticks, idx, hold, cps, cpIdx }
+// Code that only asks "are we watching?" tests swing.playback itself.
+function isTrajPlayback() {
+  return !!swing.playback && swing.playback.kind === 'traj';
+}
+
 const runs = {
   DB: 'apexSwing', STORE: 'runs', VERSION: 1,
   MAX_RUNS: 40,              // recordings kept, newest-first
@@ -1381,7 +1390,7 @@ function resetRun() {
   swing.acted = false; swing.awaitTap = false;
   swing.tick = 0;
   swing.traj = { samples: [], events: [] };   // what actually happened
-  swing.replay = null; swing.replaySource = null; swing.trajPlay = null;
+  swing.playback = null; swing.replaySource = null;
   swing.pendingWreck = null;
   rhythmStep = 0;   // RHYTHM theme: fresh melodic phrase each attempt
   swing.avatar = Bodies.polygon(S.START_X, S.SIM_H * 0.32, 5, S.AVATAR_R, {
@@ -1514,7 +1523,7 @@ function grabRope() {
   });
   swing.ropePeg = peg;
   Composite.add(engine.world, swing.rope);
-  if (!swing.replay) swing.traj.events.push({ t: swing.tick, peg: { x: peg.x, y: peg.y } });
+  if (!swing.playback) swing.traj.events.push({ t: swing.tick, peg: { x: peg.x, y: peg.y } });
   sfx.attach();
   haptic('tick');
 }
@@ -1524,7 +1533,7 @@ function releaseRope() {
   Composite.remove(engine.world, swing.rope);
   swing.rope = null;
   swing.ropePeg = null;
-  if (!swing.replay) swing.traj.events.push({ t: swing.tick, peg: null });
+  if (!swing.playback) swing.traj.events.push({ t: swing.tick, peg: null });
   sfx.release();
 }
 
@@ -1582,7 +1591,7 @@ function swingDie() {
   swing.dead = true;
 
   // replays are spectation: they never touch stats or the idle counter
-  if (swing.replay) {
+  if (swing.playback) {
     swing.deadTimer = S.RESET_DELAY;
     sfx.fall(); sfx.wreck();
     if (!videoRec.active) flash('REPLAY OVER', COLORS.BIN);   // not into the video
@@ -1666,7 +1675,7 @@ function swingTick(dt) {
     if (swing.awaitTap) return;             // parked until the player taps
     swing.deadTimer -= dt;
     if (swing.deadTimer <= 0) {
-      if (swing.replay) {
+      if (swing.playback) {
         if (videoRec.nativeStop) videoRec.nativeStop();   // ReplayKit POC
         else if (videoRec.active && videoRec.onReplayEnd) videoRec.onReplayEnd();
         else showReplayOffer();             // replay finished: ask what next
@@ -1703,11 +1712,11 @@ function swingTick(dt) {
   // rope (retrying every tick doubles as the sticky hold). Replay: the
   // recorded tick list drives the same wantHold state.
   let wantHold;
-  if (swing.replay) {
-    const r = swing.replay;
-    if (swing.trajPlay) {                 // trajectory: draw the recorded path
+  if (swing.playback) {
+    const r = swing.playback;
+    if (r.kind === 'traj') {              // trajectory: draw the recorded path
       applyTrajectoryTick();
-      if (swing.tick >= swing.trajPlay.endTick) { swingDie(); return; }
+      if (swing.tick >= r.endTick) { swingDie(); return; }
       wantHold = !!swing.rope;            // keep grab/release below a no-op
     } else {
     // snap to any ground-truth checkpoint due at this tick: resimulation
@@ -1798,7 +1807,7 @@ function swingTick(dt) {
   // style) and kicks a stalled pendulum forward, so bottoming out on a grab
   // never strands the player. The winch reels the rope in while held, adding
   // energy the way a skater pulls their arms in.
-  if (swing.rope && swing.ropePeg && !swing.trajPlay) {   // no forces in playback
+  if (swing.rope && swing.ropePeg && !isTrajPlayback()) {   // no forces in playback
     const peg = swing.ropePeg;
     const rx = a.position.x - peg.x, ry = a.position.y - peg.y;
     const rl = Math.hypot(rx, ry) || 1;
@@ -1860,7 +1869,7 @@ function swingTick(dt) {
   // (checked above) is the truth, and the camera kill line depends on the
   // viewer's screen width, which must never end someone else's run early.
   const serene = store.data.settings.difficulty === 'serene';
-  const cinematic = swing.trajPlay || (swing.replay && swing.replay.endTick !== null);
+  const cinematic = swing.playback && swing.playback.endTick !== null;
   if (!cinematic &&
       (a.position.y > S.SIM_H - S.SPIKE_H - 2 ||   // kill floor
        a.position.x < swing.camX - S.KILL_MARGIN || // fell behind the camera
@@ -2276,7 +2285,7 @@ function encodeTrajectory(dist, stride = 1) {
 // position, angle and rope anchor are simply set. Between decimated samples
 // the path is interpolated, so a link-sized recording still looks smooth.
 function applyTrajectoryTick() {
-  const tp = swing.trajPlay, a = swing.avatar;
+  const tp = swing.playback, a = swing.avatar;
   if (!a) return;
   const t = swing.tick, stride = tp.stride;
   const i = Math.min(tp.samples.length - 1, Math.floor(t / stride));
@@ -2413,17 +2422,17 @@ function playReplay(rep) {
   if (rep.kind === 'traj') {
     // physics off: the avatar is driven along the recorded path
     Body.setStatic(swing.avatar, true);
-    swing.trajPlay = {
-      samples: rep.samples, events: rep.events, stride: rep.stride,
-      endTick: rep.endTick, evIdx: 0,
+    swing.playback = {
+      kind: 'traj', endTick: rep.endTick,
+      samples: rep.samples, events: rep.events, stride: rep.stride, evIdx: 0,
     };
-    swing.replay = { ticks: [], idx: 0, hold: false, endTick: rep.endTick, cps: [], cpIdx: 0 };
     swing.replaySource = rep;
     swing.acted = true;
     flash(`REPLAY · ${rep.dist} m RUN · TAP FOR OPTIONS`, COLORS.BIN, 9999999);
     return;
   }
-  swing.replay = {
+  swing.playback = {
+    kind: 'input',
     ticks: rep.ticks, idx: 0, hold: false,
     endTick: rep.endTick == null ? null : rep.endTick,
     cps: rep.checkpoints || [], cpIdx: 0,
@@ -2438,7 +2447,7 @@ function playReplay(rep) {
 function showReplayOffer() {
   if (videoRec.active) return;   // a recording owns the screen
   const rep = swing.replaySource;
-  swing.replay = null;
+  swing.playback = null;
   ui.flash.classList.remove('show');
   audio.swingWhistle(false, 0); audio.whoosh(0);
   if (swing.rope) { Composite.remove(engine.world, swing.rope); swing.rope = null; swing.ropePeg = null; }
@@ -2468,7 +2477,7 @@ function showWreckCard(info) {
 // can pick a different course).
 function returnToStart() {
   started = false;
-  swing.awaitTap = false; swing.replay = null;
+  swing.awaitTap = false; swing.playback = null;
   audio.silenceLoops();
   if (swing.rope) { Composite.remove(engine.world, swing.rope); swing.rope = null; swing.ropePeg = null; }
   if (swing.avatar) { Composite.remove(engine.world, swing.avatar); swing.avatar = null; }
@@ -3184,7 +3193,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (fs.want) fs.request();   // rotation kicked us out: this tap re-enters
   if (!started) return;
   if (anyModalOpen()) return;   // a dialog owns input — its own buttons answer
-  if (swing.replay) { showReplayOffer(); return; }   // exit a replay -> options
+  if (swing.playback) { showReplayOffer(); return; }   // exit a replay -> options
   if (swing.awaitTap) {                  // "still there?" -> this tap answers
     swing.awaitTap = false; swing.idleDeaths = 0; ui.flash.classList.remove('show'); resetRun(); return;
   }
@@ -3242,7 +3251,7 @@ window.addEventListener('keydown', (e) => {
   }
   if (anyModalOpen()) return;   // a dialog owns input
   if (!started) { if (VIEWER) return; audio.unlock(); enterSwing(); return; }
-  if (swing.replay) { showReplayOffer(); return; }         // exit a replay -> options
+  if (swing.playback) { showReplayOffer(); return; }         // exit a replay -> options
   if (swing.awaitTap) {                  // "still there?" -> this key answers
     swing.awaitTap = false; swing.idleDeaths = 0;
     ui.flash.classList.remove('show'); resetRun(); return;
@@ -3267,7 +3276,7 @@ ui.retry.addEventListener('pointerup', (e) => {
   e.stopPropagation();
   if (videoRec.active) return;   // HUD is hidden while recording; belt-and-braces
   sfx.tick();
-  swing.replay = null; swing.awaitTap = false;
+  swing.playback = null; swing.awaitTap = false;
   ui.flash.classList.remove('show');
   resetRun();
 });
