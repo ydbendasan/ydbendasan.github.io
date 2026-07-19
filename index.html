@@ -51,30 +51,46 @@
     letter-spacing: 2px; padding: 7px 13px; border-radius: 4px;
   }
   #retryBtn:active { background: rgba(39,232,255,.18); }
-  #hudSub {
-    display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px;
-    margin-top: 9px; pointer-events: none;
-  }
-  #hudSub button {
+  #menuBtn {
     pointer-events: auto; touch-action: manipulation;
-    background: rgba(7,11,20,.55);
-    font-family: var(--mono); font-size: 9px;
-    letter-spacing: 1.5px; padding: 5px 8px; border-radius: 4px;
+    background: transparent; border: 1px solid rgba(255,255,255,.35);
+    color: #fff; font-family: var(--mono); font-size: 13px;
+    padding: 7px 12px; border-radius: 4px; margin-left: 8px;
   }
-  #courseBtn { border: 1px solid rgba(39,232,255,.45); color: var(--neon); }
-  #courseBtn:active { background: rgba(39,232,255,.15); }
-  #watchBtn { border: 1px solid rgba(255,255,255,.35); color: #fff; }
-  #watchBtn:active { background: rgba(255,255,255,.12); }
-  #shareBtn { border: 1px solid rgba(182,255,46,.5); color: var(--good); }
-  #shareBtn:active { background: rgba(182,255,46,.15); }
-  #themeBtn { border: 1px solid rgba(255,61,240,.45); color: var(--mag); }
-  #themeBtn:active { background: rgba(255,61,240,.15); }
-  #soundBtn { border: 1px solid rgba(39,232,255,.45); color: var(--neon); }
-  #soundBtn.off { color: #6b7f99; border-color: rgba(120,140,170,.4); }
-  #soundBtn:active { background: rgba(39,232,255,.15); }
-  #modeBtn { border: 1px solid rgba(182,255,46,.5); color: var(--good); }
-  #modeBtn.off { color: var(--neon); border-color: rgba(39,232,255,.5); }
-  #modeBtn:active { background: rgba(255,255,255,.12); }
+  #menuBtn:active { background: rgba(255,255,255,.12); }
+
+  /* ---------------- In-game menu (paused) ---------------- */
+  #menuModal {
+    position: fixed; inset: 0; z-index: 24;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(4,7,14,.85); font-family: var(--mono); padding: 20px;
+  }
+  #menuBox {
+    width: min(88vw, 340px); display: flex; flex-direction: column; gap: 10px;
+    background: #0a101e; border: 1px solid rgba(39,232,255,.5); border-radius: 10px;
+    box-shadow: 0 0 24px rgba(39,232,255,.18); padding: 20px 18px;
+  }
+  #menuTitle {
+    font-size: 13px; font-weight: 700; letter-spacing: 3px;
+    color: var(--neon); text-align: center; margin-bottom: 4px;
+  }
+  #menuBox > button {
+    background: transparent; border: 1px solid rgba(255,255,255,.3);
+    color: #cfe9ff; font-family: var(--mono); font-size: 12px; letter-spacing: 2px;
+    padding: 11px 0; border-radius: 6px; touch-action: manipulation;
+  }
+  #menuBox > button:active { background: rgba(255,255,255,.12); }
+  #menuQuit { border-color: rgba(255,61,110,.45) !important; color: #ff3d6e !important; }
+  #menuResume { border-color: rgba(255,255,255,.55) !important; color: #fff !important; font-weight: 700; }
+  #menuSettings { display: flex; gap: 8px; }
+  #menuSettings button {
+    flex: 1; background: transparent; border: 1px solid rgba(255,255,255,.3);
+    color: #cfe9ff; font-family: var(--mono); font-size: 9px; letter-spacing: 1px;
+    padding: 9px 0; border-radius: 6px; touch-action: manipulation;
+  }
+  #themeBtn { border-color: rgba(255,61,240,.45) !important; color: var(--mag) !important; }
+  #soundBtn.off { color: #6b7f99 !important; border-color: rgba(120,140,170,.4) !important; }
+  #modeBtn.off { color: var(--neon) !important; border-color: rgba(39,232,255,.5) !important; }
 
   /* ---------------- Flash messages ---------------- */
   #flash {
@@ -129,6 +145,13 @@
   #runOfferTitle { font-size: 13px; font-weight: 700; letter-spacing: 3px; color: var(--good); }
   #runOfferText { font-size: 18px; font-weight: 700; letter-spacing: 1px; color: #fff; }
   #runOfferHint { font-size: 10px; letter-spacing: 1.5px; line-height: 1.7; color: #cfe9ff; opacity: .6; }
+  #runOfferShare { display: flex; gap: 9px; }
+  #runOfferShare button {
+    flex: 1; background: transparent; border: 1px solid rgba(182,255,46,.5);
+    color: var(--good); font-family: var(--mono); font-size: 11px; letter-spacing: 1.5px;
+    padding: 11px 0; border-radius: 6px; touch-action: manipulation; font-weight: 700;
+  }
+  #runOfferShare button:active { background: rgba(182,255,46,.15); }
   #runOfferBtns { display: flex; gap: 9px; }
   #runOfferBtns button {
     flex: 1; background: transparent; border: 1px solid rgba(255,255,255,.3);
@@ -168,12 +191,57 @@
   #seedBtns button:active { background: rgba(255,255,255,.12); }
   #seedApply { border-color: var(--mag) !important; color: var(--mag) !important; font-weight: 700; }
 
-  /* ---------------- Start-screen mode toggle ---------------- */
-  #startMode {
+  /* ---------------- Start-screen mode/course toggles ---------------- */
+  #startMode, #startCourse, #startRuns, #startShare {
     margin-top: 4px; font-family: var(--mono); font-size: 11px; letter-spacing: 2px;
     color: var(--good); background: transparent; border: 1px solid rgba(182,255,46,.45);
     padding: 8px 16px; border-radius: 6px; touch-action: manipulation;
   }
+  #startCourse, #startRuns { color: var(--neon); border-color: rgba(39,232,255,.45); }
+  #startCourse:active, #startRuns:active { background: rgba(39,232,255,.15); }
+  #startShare:active { background: rgba(182,255,46,.15); }
+
+  /* ---------------- Best-runs browser ---------------- */
+  #runsModal {
+    position: fixed; inset: 0; z-index: 24;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(4,7,14,.85); font-family: var(--mono); padding: 20px;
+  }
+  #runsBox {
+    width: min(92vw, 400px); display: flex; flex-direction: column; gap: 10px;
+    background: #0a101e; border: 1px solid rgba(39,232,255,.5); border-radius: 10px;
+    box-shadow: 0 0 24px rgba(39,232,255,.18); padding: 20px 18px;
+  }
+  #runsTitle {
+    font-size: 13px; font-weight: 700; letter-spacing: 3px;
+    color: var(--neon); text-align: center; margin-bottom: 4px;
+  }
+  #runsList { display: flex; flex-direction: column; gap: 8px; max-height: 55vh; overflow-y: auto; }
+  #runsList .runRow {
+    display: flex; align-items: center; gap: 8px;
+    border: 1px solid rgba(255,255,255,.18); border-radius: 6px; padding: 9px 10px;
+  }
+  #runsList .runName {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 11px; letter-spacing: 1px; color: #cfe9ff;
+  }
+  #runsList .runDist { font-size: 11px; letter-spacing: 1px; color: var(--good); font-weight: 700; }
+  #runsList .runRow button {
+    background: transparent; border: 1px solid rgba(255,255,255,.3);
+    color: #cfe9ff; font-family: var(--mono); font-size: 10px; letter-spacing: 1px;
+    padding: 6px 8px; border-radius: 5px; touch-action: manipulation;
+  }
+  #runsList .runRow button:active { background: rgba(255,255,255,.12); }
+  #runsList .runWatch { color: var(--neon); border-color: rgba(39,232,255,.45); }
+  #runsList .runDel { color: var(--bad, #ff3d6e); border-color: rgba(255,61,110,.45); }
+  #runsList .runDel.arm { background: rgba(255,61,110,.18); font-weight: 700; }
+  #runsEmpty { font-size: 11px; letter-spacing: 1.5px; color: #cfe9ff; opacity: .55; text-align: center; padding: 14px 0; }
+  #runsClose {
+    background: transparent; border: 1px solid rgba(255,255,255,.55);
+    color: #fff; font-family: var(--mono); font-size: 12px; letter-spacing: 2px;
+    padding: 11px 0; border-radius: 6px; touch-action: manipulation; font-weight: 700;
+  }
+  #runsClose:active { background: rgba(255,255,255,.12); }
   #startMode.off { color: var(--neon); border-color: rgba(39,232,255,.45); }
   #startMode:active { background: rgba(255,255,255,.1); }
 
@@ -190,28 +258,31 @@
   .itchLink { color: var(--neon); border: 1px solid rgba(39,232,255,.45); font-size: 11px; }
   .itchLink:active { background: rgba(39,232,255,.15); }
 
-  /* ---------------- New-best share offer ---------------- */
-  #bestPrompt {
+  /* ---------------- Wreck card (end-of-run beat) ---------------- */
+  #wreckCard {
     position: fixed; inset: 0; z-index: 22;
     display: flex; align-items: center; justify-content: center;
-    background: rgba(4,7,14,.82); font-family: var(--mono); padding: 20px;
+    background: rgba(4,7,14,.72); font-family: var(--mono); padding: 20px;
   }
-  #bestBox {
+  #wreckBox {
     width: min(88vw, 360px); display: flex; flex-direction: column; gap: 13px;
     background: #0a101e; border: 1px solid rgba(182,255,46,.55); border-radius: 10px;
     box-shadow: 0 0 24px rgba(182,255,46,.2); padding: 20px 18px; text-align: center;
   }
-  #bestTitle { font-size: 13px; font-weight: 700; letter-spacing: 3px; color: var(--good); }
-  #bestPromptText { font-size: 20px; font-weight: 700; letter-spacing: 1px; color: #fff; }
-  #bestHint { font-size: 10px; letter-spacing: 1.5px; line-height: 1.7; color: #cfe9ff; opacity: .6; }
-  #bestBtns { display: flex; gap: 9px; }
-  #bestBtns button {
+  #wreckTitle { font-size: 13px; font-weight: 700; letter-spacing: 3px; color: var(--good); }
+  #wreckCard.plain #wreckTitle { color: var(--neon); }
+  #wreckCard.plain #wreckBox { border-color: rgba(39,232,255,.5); box-shadow: 0 0 24px rgba(39,232,255,.18); }
+  #wreckText { font-size: 20px; font-weight: 700; letter-spacing: 1px; color: #fff; }
+  #wreckHint { font-size: 10px; letter-spacing: 1.5px; line-height: 1.7; color: #cfe9ff; opacity: .6; }
+  #wreckBtns { display: flex; gap: 9px; }
+  #wreckBtns button {
     flex: 1; background: transparent; border: 1px solid rgba(255,255,255,.3);
     color: #cfe9ff; font-family: var(--mono); font-size: 11px; letter-spacing: 1.5px;
     padding: 11px 0; border-radius: 6px; touch-action: manipulation;
   }
-  #bestBtns button:active { background: rgba(255,255,255,.12); }
-  #bestShare { border-color: var(--good) !important; color: var(--good) !important; font-weight: 700; }
+  #wreckBtns button:active { background: rgba(255,255,255,.12); }
+  #wreckAgain { border-color: rgba(255,255,255,.55) !important; color: #fff !important; font-weight: 700; }
+  #wreckShare, #wreckVideo { border-color: var(--good) !important; color: var(--good) !important; }
   .hidden { display: none !important; }
 </style>
 </head><body>
@@ -222,16 +293,24 @@
       <div id="levelLabel">DIST 0 m</div>
       <div id="volLabel">BEST 0 m</div>
       <button id="retryBtn" type="button">RETRY</button>
-    </div>
-    <div id="hudSub">
-      <button id="courseBtn" type="button">COURSE</button>
-      <button id="watchBtn" type="button">&#9654; BEST</button>
-      <button id="shareBtn" type="button">SHARE</button>
-      <button id="themeBtn" type="button">FX &middot; RHYTHM</button>
-      <button id="soundBtn" type="button">SOUND ON</button>
-      <button id="modeBtn" type="button">MODE &middot; NORMAL</button>
+      <button id="menuBtn" type="button">&#9776;</button>
     </div>
   </div>
+
+  <!-- In-game menu: pauses the run; everything that used to crowd the HUD -->
+  <div id="menuModal" class="hidden">
+    <div id="menuBox">
+      <div id="menuTitle">PAUSED</div>
+      <div id="menuSettings">
+        <button id="themeBtn" type="button">FX &middot; RHYTHM</button>
+        <button id="soundBtn" type="button">SOUND ON</button>
+        <button id="modeBtn" type="button">MODE &middot; NORMAL</button>
+      </div>
+      <button id="menuQuit" type="button">EXIT TO TITLE</button>
+      <button id="menuResume" type="button">RESUME</button>
+    </div>
+  </div>
+
 
   <div id="flash"></div>
 
@@ -240,6 +319,9 @@
     <div id="startTag">HOLD = SWING &amp; PUMP &middot; RELEASE = FLY &middot; DON'T STOP</div>
     <div id="startInfo"></div>
     <button id="startPlay" type="button">TAP TO PLAY</button>
+    <button id="startCourse" type="button">COURSE</button>
+    <button id="startRuns" type="button">BEST RUNS</button>
+    <button id="startShare" type="button">SHARE CARD</button>
     <button id="startMode" type="button">MODE &middot; NORMAL</button>
     <div id="storeLinks" class="hidden">
       <a id="playStoreLink" class="playLink" href="https://play.google.com/store/apps/details?id=com.ydbendasan.apexswing">GET THE APP &middot; GOOGLE PLAY</a>
@@ -252,10 +334,14 @@
       <div id="runOfferTitle">SHARED RUN</div>
       <div id="runOfferText">47 m</div>
       <div id="runOfferHint">WATCH IT REPLAYED, OR PLAY THE SAME COURSE YOURSELF.</div>
+      <div id="runOfferShare" class="hidden">
+        <button id="runOfferShareVideo" type="button">SHARE VIDEO</button>
+        <button id="runOfferShareRun" type="button">SHARE RUN</button>
+      </div>
       <div id="runOfferBtns">
         <button id="runOfferWatch" type="button">WATCH RUN</button>
         <button id="runOfferPlay" type="button">PLAY COURSE</button>
-        <button id="runOfferLater" type="button">LATER</button>
+        <button id="runOfferLater" type="button">DISMISS</button>
       </div>
       <div id="runOfferStore" class="hidden">
         <a class="playLink" href="https://play.google.com/store/apps/details?id=com.ydbendasan.apexswing">GET THE APP &middot; GOOGLE PLAY</a>
@@ -264,14 +350,25 @@
     </div>
   </div>
 
-  <div id="bestPrompt" class="hidden">
-    <div id="bestBox">
-      <div id="bestTitle">NEW PERSONAL BEST</div>
-      <div id="bestPromptText">0 m</div>
-      <div id="bestHint">SHARE THIS RUN SO A FRIEND CAN WATCH IT AND CHASE YOUR DISTANCE.</div>
-      <div id="bestBtns">
-        <button id="bestShare" type="button">SHARE RUN</button>
-        <button id="bestAgain" type="button">PLAY AGAIN</button>
+  <!-- Best-runs browser: every saved course-best recording -->
+  <div id="runsModal" class="hidden">
+    <div id="runsBox">
+      <div id="runsTitle">BEST RUNS</div>
+      <div id="runsList"></div>
+      <button id="runsClose" type="button">CLOSE</button>
+    </div>
+  </div>
+
+  <!-- Wreck card: the earned end-of-run beat (new best or a meaningful run) -->
+  <div id="wreckCard" class="hidden">
+    <div id="wreckBox">
+      <div id="wreckTitle">WRECKED</div>
+      <div id="wreckText">0 m</div>
+      <div id="wreckHint"></div>
+      <div id="wreckBtns">
+        <button id="wreckAgain" type="button">GO AGAIN</button>
+        <button id="wreckShare" type="button">SHARE CARD</button>
+        <button id="wreckVideo" type="button">SHARE VIDEO</button>
       </div>
     </div>
   </div>
@@ -353,6 +450,7 @@ const CONFIG = {
     RESET_DELAY: 1.0,      // s of neon explosion before the instant retry
     NEW_BEST_DELAY: 1.6,   // s — a new best earns a slightly longer beat
     NEW_BEST_MIN: 10,      // m — don't throw confetti for trivial firsts
+    WRECK_CARD_MIN_M: 30,  // m — runs at least this long earn the wreck card
     START_X: 150,
     // Canonical simulation height used for all physics/course generation so
     // that replays are device-independent. Rendering uses one uniform scale,
@@ -397,17 +495,22 @@ const ui = {
   hud: $('hud'), level: $('levelLabel'), vol: $('volLabel'), retry: $('retryBtn'),
   flash: $('flash'),
   start: $('start'), startInfo: $('startInfo'), startPlay: $('startPlay'),
-  startMode: $('startMode'),
-  courseBtn: $('courseBtn'), watchBtn: $('watchBtn'), shareBtn: $('shareBtn'),
+  startMode: $('startMode'), startCourse: $('startCourse'), startRuns: $('startRuns'),
+  startShare: $('startShare'),
+  menuBtn: $('menuBtn'), menuModal: $('menuModal'), menuResume: $('menuResume'),
+  menuQuit: $('menuQuit'),
+  runsModal: $('runsModal'), runsList: $('runsList'), runsClose: $('runsClose'),
   themeBtn: $('themeBtn'), soundBtn: $('soundBtn'), modeBtn: $('modeBtn'),
-  bestPrompt: $('bestPrompt'), bestPromptText: $('bestPromptText'),
-  bestShare: $('bestShare'), bestAgain: $('bestAgain'),
+  wreckCard: $('wreckCard'), wreckTitle: $('wreckTitle'), wreckText: $('wreckText'),
+  wreckHint: $('wreckHint'), wreckAgain: $('wreckAgain'),
+  wreckShare: $('wreckShare'), wreckVideo: $('wreckVideo'),
   seedModal: $('seedModal'), seedInput: $('seedInput'),
   seedDaily: $('seedDaily'), seedRandom: $('seedRandom'),
   seedApply: $('seedApply'), seedCopyRun: $('seedCopyRun'),
   runOffer: $('runOffer'), runOfferText: $('runOfferText'),
   runOfferWatch: $('runOfferWatch'), runOfferPlay: $('runOfferPlay'),
-  runOfferLater: $('runOfferLater'),
+  runOfferLater: $('runOfferLater'), runOfferShare: $('runOfferShare'),
+  runOfferShareVideo: $('runOfferShareVideo'), runOfferShareRun: $('runOfferShareRun'),
 };
 
 /* ============================================================================
@@ -1122,7 +1225,7 @@ function resetRun() {
   swing.acted = false; swing.awaitTap = false;
   swing.tick = 0; swing.recording = []; swing.checkpoints = [];
   swing.replay = null; swing.replaySource = null;
-  swing.pendingBestShare = false;
+  swing.pendingWreck = null;
   rhythmStep = 0;   // RHYTHM theme: fresh melodic phrase each attempt
   swing.avatar = Bodies.polygon(S.START_X, S.SIM_H * 0.32, 5, S.AVATAR_R, {
     frictionAir: 0.0025, restitution: 0.3, density: 0.0022,
@@ -1348,10 +1451,13 @@ function swingDie() {
   as.courseBest[swing.courseName] = Math.max(prev, m);
   const courses = Object.keys(as.courseBest);
   if (courses.length > 40) delete as.courseBest[courses[0]];   // keep the map small
+  // every run is recordable-as-video until the next one starts; the run
+  // that set the course best also becomes its shareable replay
+  const code = encodeReplay(m);
+  swing.lastRunCode = code;
   if (m > prev) {
-    // the run that set the course best becomes its shareable replay
     as.courseReplay = as.courseReplay || {};
-    as.courseReplay[swing.courseName] = encodeReplay(m);
+    as.courseReplay[swing.courseName] = code;
     const reps = Object.keys(as.courseReplay);
     if (reps.length > 10) delete as.courseReplay[reps[0]];
   }
@@ -1361,11 +1467,16 @@ function swingDie() {
   // (earned longer beat), otherwise show the gap to the course best.
   sfx.fall();     // comedic fall...
   sfx.wreck();    // ...into the boom
+  // Earned punctuation: a meaningful run (new best, a cleared section, or
+  // real distance) gets the wreck card after the beat; trivial deaths keep
+  // the instant go-again loop.
+  const meaningful = newBest || swing.section > 1 || m >= S.WRECK_CARD_MIN_M;
+  swing.pendingWreck = meaningful
+    ? { m, newBest, section: swing.section, best: as.courseBest[swing.courseName] }
+    : null;
   if (newBest) {
     sfx.newBest();
     swing.deadTimer = S.NEW_BEST_DELAY;
-    swing.pendingBestShare = m >= S.NEW_BEST_MIN;   // offer to share after the beat
-    swing.lastBestM = m;
     flash(`NEW BEST · ${m} m`, COLORS.GOOD, 1500, true);
     for (let i = 0; i < 18; i++) {
       const ang = Math.random() * Math.PI * 2, sp = 80 + Math.random() * 260;
@@ -1401,9 +1512,10 @@ function swingTick(dt) {
       if (swing.replay) {
         if (videoRec.active && videoRec.onReplayEnd) videoRec.onReplayEnd();
         else showReplayOffer();             // replay finished: ask what next
-      } else if (swing.pendingBestShare) {
-        swing.pendingBestShare = false;
-        showBestPrompt();                   // new best: offer to share the run
+      } else if (swing.pendingWreck) {
+        const info = swing.pendingWreck;
+        swing.pendingWreck = null;
+        showWreckCard(info);                // meaningful run: the earned beat
       } else if (swing.idleDeaths >= 2) {
         // attention is clearly elsewhere: stop the restart treadmill
         swing.awaitTap = true;
@@ -2020,12 +2132,20 @@ function showReplayOffer() {
 }
 
 // New personal best just landed — offer to share the run before restarting.
-function showBestPrompt() {
+// The end-of-run beat: distance + context, with GO AGAIN / SHARE CARD /
+// SHARE VIDEO. New bests get the celebratory green trim; other meaningful
+// runs the plain cyan one.
+function showWreckCard(info) {
   swing.awaitTap = true;   // park behind the dialog
   ui.flash.classList.remove('show');
   audio.swingWhistle(false, 0); audio.whoosh(0);
-  ui.bestPromptText.textContent = `NEW BEST · ${swing.lastBestM} m`;
-  ui.bestPrompt.classList.remove('hidden');
+  ui.wreckCard.classList.toggle('plain', !info.newBest);
+  ui.wreckTitle.textContent = info.newBest ? 'NEW PERSONAL BEST' : 'WRECKED';
+  ui.wreckText.textContent = `${info.m} m`;
+  ui.wreckHint.textContent = info.newBest
+    ? 'SHARE THIS RUN SO A FRIEND CAN WATCH IT AND CHASE YOUR DISTANCE.'
+    : `${info.section > 1 ? `${info.section - 1} SECTION${info.section > 2 ? 'S' : ''} CLEARED · ` : ''}BEST ${info.best} m`;
+  ui.wreckCard.classList.remove('hidden');
 }
 
 // Back to the title screen (LATER from an end-of-replay offer, so the player
@@ -2127,8 +2247,9 @@ function drawVideoWatermark(g, VW, VH) {
   g.restore();
 }
 
-// Renders rep into a video Blob. opts.landscape picks 1920×1080 over the
-// default 1080×1920. Resolves { blob, mime, width, height, seconds }.
+// Renders rep into a video Blob at the player's own viewport aspect,
+// upscaled toward 1080p-class output. Resolves { blob, mime, width,
+// height, seconds }.
 function recordReplayVideo(rep, opts = {}) {
   return new Promise((resolve, reject) => {
     if (videoRec.active) { reject(new Error('already recording')); return; }
@@ -2136,8 +2257,14 @@ function recordReplayVideo(rep, opts = {}) {
     if (!mime || !document.createElement('canvas').captureStream) {
       reject(new Error('video capture unsupported here')); return;
     }
-    const VW = opts.landscape ? 1920 : 1080;
-    const VH = opts.landscape ? 1080 : 1920;
+    // Record at the player's own viewport aspect: replaying at the same
+    // VIEW_W makes the resim bit-identical to the live run (generation
+    // timing matches), so checkpoint snaps become no-ops and the motion is
+    // exactly what the player saw. Upscale toward 1080p-class output —
+    // pure render scaling, the world framing and physics are unchanged.
+    const vscale = Math.min(1920 / Math.max(W, H), 1080 / Math.min(W, H));
+    const VW = Math.round(W * vscale);
+    const VH = Math.round(H * vscale);
     const composite = document.createElement('canvas');
     composite.width = VW; composite.height = VH;
     const g = composite.getContext('2d');
@@ -2205,7 +2332,9 @@ function recordReplayVideo(rep, opts = {}) {
       };
       rec.onstop = wrap;
       try { rec.stop(); } catch (e) { wrap(); }   // already stopped: keep the footage
-      showReplayOffer();       // hand the player back to the normal end-of-replay flow
+      // share flows clean up themselves (opts.silentEnd); the debug path
+      // hands the player back to the normal end-of-replay offer
+      if (!opts.silentEnd) showReplayOffer();
     };
     videoRec.abort = settle;   // canvas tap / space cancels the render
     const onHidden = () => { if (document.hidden) settle(); };   // no frozen segments
@@ -2316,6 +2445,9 @@ let pendingRunOffer = null;
 function showRunOffer(rep) {
   pendingRunOffer = rep;
   ui.runOfferText.textContent = `${rep.dist} m ON “${rep.course}”`;
+  // The player's own saved runs offer sharing; received runs never do.
+  const own = !!rep.own && !VIEWER;
+  ui.runOfferShare.classList.toggle('hidden', !own);
   ui.runOffer.classList.remove('hidden');
 }
 
@@ -2448,13 +2580,19 @@ function renderShareCard() {
   return cv;
 }
 
+// The one share sentence, for any course — the card, the video, and the
+// run-offer SHARE RUN all speak with the same voice.
+function shareRunText(course, best) {
+  const link = runLink(course);
+  return link
+    ? `${best} m on “${course}” in Apex Swing — open this link to WATCH my run, then beat it: ${link}`
+    : `${best} m on “${course}” in Apex Swing — type the phrase, beat my distance: ${CONFIG.SHARE_URL}`;
+}
+
 function shareText() {
   const as = store.data.apex_swing;
   const best = Math.max((as.courseBest || {})[swing.courseName] || 0, swing.sessionBest);
-  const link = runLink(swing.courseName);
-  return link
-    ? `${best} m on “${swing.courseName}” in Apex Swing — open this link to WATCH my run, then beat it: ${link}`
-    : `${best} m on “${swing.courseName}” in Apex Swing — type the phrase, beat my distance: ${CONFIG.SHARE_URL}`;
+  return shareRunText(swing.courseName, best);
 }
 
 // Blob -> bare base64 (no data: prefix), for Capacitor Filesystem.writeFile.
@@ -2521,6 +2659,62 @@ function shareScore() {
       : (copied ? 'LINK COPIED · POST IT' : 'SHARE UNAVAILABLE');
     flash(msg, saved || copied ? COLORS.GOOD : COLORS.BAD);
   }, 'image/png');
+}
+
+/* ============================================================================
+   Video share — pick orientation, replay-record the last run (or the course
+   best), then hand the file to the OS share sheet / web share / download.
+   ============================================================================ */
+async function shareVideoFile({ blob, mime }) {
+  const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+  const name = `apex-swing-run.${ext}`;
+  const text = shareText();
+  if (native.on && native.Share && native.Filesystem) {
+    try {
+      const base64 = await blobToBase64(blob);
+      await native.Filesystem.writeFile({ path: name, data: base64, directory: 'CACHE' });
+      const { uri } = await native.Filesystem.getUri({ path: name, directory: 'CACHE' });
+      await native.Share.share({ text, files: [uri], dialogTitle: 'Share your run' });
+      return;
+    } catch (e) {
+      if (e && /cancel/i.test(String(e.message || e))) return;   // sheet dismissed
+    }
+  }
+  // No Web Share attempt here: it requires a fresh user gesture, and the
+  // recording's duration has always consumed it by now — the call would
+  // reject (or hang headless). The app path above has no such rule; the
+  // web gets the file saved plus the link copied for manual posting.
+  try { await navigator.clipboard.writeText(text); } catch (e) { /* blocked */ }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  flash('VIDEO SAVED · LINK COPIED', COLORS.GOOD, 2000);
+}
+
+function startVideoShare(rep) {
+  // Check support BEFORE dismantling the UI: an unsupported browser should
+  // leave the player exactly where they were, card intact.
+  if (!pickVideoMime() || !document.createElement('canvas').captureStream) {
+    flash('VIDEO NOT SUPPORTED HERE', COLORS.BAD);
+    return;
+  }
+  if (!rep) {
+    const code = swing.lastRunCode
+      || (store.data.apex_swing.courseReplay || {})[swing.courseName];
+    rep = code && decodeReplay(code);
+  }
+  if (!rep) { flash('PLAY A RUN FIRST', COLORS.BAD); return; }
+  ui.wreckCard.classList.add('hidden');
+  ui.runOffer.classList.add('hidden');
+  closeMenu();
+  swing.awaitTap = false;
+  flash('RECORDING · TAP TO STOP EARLY', COLORS.BIN, 2200);
+  recordReplayVideo(rep, { silentEnd: true })
+    .then((v) => shareVideoFile(v))
+    .catch(() => flash('VIDEO RECORDING FAILED', COLORS.BAD))
+    .then(() => returnToStart());
 }
 
 /* ============================================================================
@@ -2620,8 +2814,17 @@ window.addEventListener('pointerdown', () => {
 // A modal overlay owns the input while it's up — the canvas/keys stand down.
 function anyModalOpen() {
   return !ui.runOffer.classList.contains('hidden')
-    || !ui.bestPrompt.classList.contains('hidden')
-    || !ui.seedModal.classList.contains('hidden');
+    || !ui.wreckCard.classList.contains('hidden')
+    || !ui.seedModal.classList.contains('hidden')
+    || !ui.menuModal.classList.contains('hidden')
+    || !ui.runsModal.classList.contains('hidden');
+}
+
+// The menu and runs browser pause the run outright (a swing mid-arc
+// shouldn't die behind a dialog); the other modals park the sim themselves.
+function simPaused() {
+  return !ui.menuModal.classList.contains('hidden')
+    || !ui.runsModal.classList.contains('hidden');
 }
 
 window.addEventListener('keydown', (e) => {
@@ -2663,29 +2866,117 @@ ui.retry.addEventListener('pointerup', (e) => {
   resetRun();
 });
 
-ui.courseBtn.addEventListener('pointerup', (e) => {
-  e.stopPropagation();
-  if (videoRec.active) return;
-  sfx.tick();
+function openSeedModal() {
   ui.seedInput.value = store.data.apex_swing.course || '';
   ui.seedModal.classList.remove('hidden');
   ui.seedInput.focus();
+}
+ui.startCourse.addEventListener('pointerup', (e) => {
+  e.stopPropagation();
+  audio.unlock(); sfx.tick();
+  openSeedModal();
+});
+ui.startShare.addEventListener('pointerup', (e) => {
+  e.stopPropagation();
+  audio.unlock(); sfx.tick();
+  if (!swing.courseName) swing.courseName = currentCourseName();   // pre-first-run
+  shareScore();
 });
 
-ui.watchBtn.addEventListener('pointerup', (e) => {
+/* ---- best-runs browser: watch / share / delete saved recordings ---- */
+function shareRunLinkFor(course) {
+  const m = (store.data.apex_swing.courseBest || {})[course] || 0;
+  const text = shareRunText(course, m);
+  if (native.on && native.Share) {
+    native.Share.share({ text, dialogTitle: 'Share your run' }).catch(() => {});
+    return;
+  }
+  navigator.clipboard.writeText(text).then(
+    () => flash('LINK COPIED · POST IT', COLORS.GOOD),
+    () => flash('COPY BLOCKED', COLORS.BAD),
+  );
+}
+
+// Trash can drawn inline so it inherits the button's color (an emoji would
+// render in its own colors and break the neon theme).
+const TRASH_SVG =
+  '<svg width="11" height="12" viewBox="0 0 11 12" fill="none" stroke="currentColor" stroke-width="1.3">' +
+  '<path d="M1 3h9M4 3V1.5h3V3M2 3l.7 8h5.6L9 3M4.2 5v4M6.8 5v4"/></svg>';
+
+function renderRunsList() {
+  const as = store.data.apex_swing;
+  const reps = as.courseReplay || {};
+  const courses = Object.keys(reps).reverse();   // newest saved first
+  ui.runsList.textContent = '';
+  if (!courses.length) {
+    const empty = document.createElement('div');
+    empty.id = 'runsEmpty';
+    empty.textContent = 'NO SAVED RUNS YET · SET A COURSE BEST';
+    ui.runsList.appendChild(empty);
+    return;
+  }
+  for (const course of courses) {
+    const row = document.createElement('div');
+    row.className = 'runRow';
+    const name = document.createElement('div');
+    name.className = 'runName';
+    name.textContent = course;
+    const dist = document.createElement('div');
+    dist.className = 'runDist';
+    dist.textContent = `${(as.courseBest || {})[course] || 0} m`;
+    const watch = document.createElement('button');
+    watch.className = 'runWatch'; watch.type = 'button'; watch.textContent = '▶';
+    watch.addEventListener('pointerup', (e) => {
+      e.stopPropagation();
+      const rep = decodeReplay(reps[course]);
+      if (!rep) { flash('RUN CODE UNREADABLE', COLORS.BAD); return; }
+      rep.own = true;   // the player's saved run: its end-of-replay offer shares
+      sfx.tick();
+      ui.runsModal.classList.add('hidden');
+      closeMenu();
+      playReplay(rep);
+    });
+    const del = document.createElement('button');
+    del.className = 'runDel'; del.type = 'button'; del.innerHTML = TRASH_SVG;
+    del.addEventListener('pointerup', (e) => {
+      e.stopPropagation();
+      if (!del.classList.contains('arm')) {       // two-tap confirm
+        del.classList.add('arm'); del.textContent = 'SURE?';
+        setTimeout(() => { del.classList.remove('arm'); del.innerHTML = TRASH_SVG; }, 2500);
+        return;
+      }
+      sfx.tick();
+      delete reps[course];                        // recording only — best stands
+      store.save();
+      renderRunsList();
+    });
+    row.append(name, dist, watch, del);
+    ui.runsList.appendChild(row);
+  }
+}
+
+function openRunsModal() {
+  renderRunsList();
+  ui.runsModal.classList.remove('hidden');
+}
+ui.startRuns.addEventListener('pointerup', (e) => {
   e.stopPropagation();
-  if (videoRec.active) return;
+  audio.unlock(); sfx.tick();
+  openRunsModal();
+});
+ui.runsClose.addEventListener('pointerup', (e) => {
+  e.stopPropagation(); sfx.tick();
+  ui.runsModal.classList.add('hidden');
+});
+ui.runsModal.addEventListener('pointerup', (e) => {
+  if (e.target === ui.runsModal) ui.runsModal.classList.add('hidden');
+});
+
+ui.menuQuit.addEventListener('pointerup', (e) => {
+  e.stopPropagation();
   sfx.tick();
-  const code = (store.data.apex_swing.courseReplay || {})[swing.courseName];
-  const rep = code && decodeReplay(code);
-  if (!rep) { flash('NO SAVED RUN YET · SET A BEST', COLORS.BAD); return; }
-  playReplay(rep);
-});
-
-ui.shareBtn.addEventListener('pointerup', (e) => {
-  e.stopPropagation();
-  if (videoRec.active) return;
-  sfx.tick(); shareScore();
+  closeMenu();
+  returnToStart();
 });
 
 function updateSoundBtn() {
@@ -2743,20 +3034,43 @@ ui.modeBtn.addEventListener('pointerup', (e) => {
 ui.startMode.addEventListener('pointerup', (e) => { e.stopPropagation(); toggleDifficulty(); });
 
 /* ---- new-best offer: SHARE the run or PLAY AGAIN ---- */
-ui.bestShare.addEventListener('pointerup', (e) => {
-  e.stopPropagation();
-  ui.bestPrompt.classList.add('hidden');
-  swing.awaitTap = false;
-  audio.unlock(); sfx.tick();
-  shareScore();
-  resetRun();
-});
-ui.bestAgain.addEventListener('pointerup', (e) => {
-  e.stopPropagation();
-  ui.bestPrompt.classList.add('hidden');
+/* ---- wreck card: the end-of-run beat ---- */
+function dismissWreckCard() {
+  ui.wreckCard.classList.add('hidden');
   swing.awaitTap = false;
   sfx.tick();
   resetRun();
+}
+ui.wreckAgain.addEventListener('pointerup', (e) => {
+  e.stopPropagation();
+  dismissWreckCard();
+});
+ui.wreckCard.addEventListener('pointerup', (e) => {
+  if (e.target !== ui.wreckCard) return;   // backdrop tap = go again
+  dismissWreckCard();
+});
+ui.wreckShare.addEventListener('pointerup', (e) => {
+  e.stopPropagation();
+  audio.unlock(); sfx.tick();
+  shareScore();   // card stays up: video or go-again may follow
+});
+ui.wreckVideo.addEventListener('pointerup', (e) => {
+  e.stopPropagation();
+  audio.unlock(); sfx.tick();
+  startVideoShare();
+});
+
+/* ---- in-game menu ---- */
+function closeMenu() { ui.menuModal.classList.add('hidden'); }
+ui.menuBtn.addEventListener('pointerup', (e) => {
+  e.stopPropagation();
+  if (videoRec.active) return;
+  sfx.tick();
+  ui.menuModal.classList.remove('hidden');   // simPaused() freezes the run
+});
+ui.menuResume.addEventListener('pointerup', (e) => { e.stopPropagation(); sfx.tick(); closeMenu(); });
+ui.menuModal.addEventListener('pointerup', (e) => {
+  if (e.target === ui.menuModal) closeMenu();
 });
 
 /* ---- course seed picker ---- */
@@ -2800,6 +3114,19 @@ ui.runOfferPlay.addEventListener('pointerup', () => {
   store.data.apex_swing.course = rep.course;
   store.save();
   enterSwing();
+});
+ui.runOfferShareVideo.addEventListener('pointerup', (e) => {
+  e.stopPropagation();
+  const rep = pendingRunOffer;
+  pendingRunOffer = null;
+  audio.unlock(); sfx.tick();
+  ui.runOffer.classList.add('hidden');
+  if (rep) startVideoShare(rep);
+});
+ui.runOfferShareRun.addEventListener('pointerup', (e) => {
+  e.stopPropagation();
+  audio.unlock(); sfx.tick();
+  if (pendingRunOffer) shareRunLinkFor(pendingRunOffer.course);
 });
 ui.runOfferLater.addEventListener('pointerup', () => {
   pendingRunOffer = null;
@@ -2904,7 +3231,8 @@ function frame(now) {
     VIEW_Y *= Math.pow(0.85, dtMs / 16.7); // settle back to the full band
     if (Math.abs(VIEW_Y) < 0.5) VIEW_Y = 0;
   }
-  acc += dtMs;
+  if (simPaused()) acc = 0;   // menu open: hold time still, no catch-up burst
+  else acc += dtMs;
   let steps = 0;
   while (acc >= STEP && steps++ < 4) {
     if (started) { swingTick(STEP / 1000); Engine.update(engine, STEP); }
@@ -2929,8 +3257,9 @@ resize();
 // Viewer build: strip every route into free play — spectating and store
 // links only. WATCH stays; sound/theme toggles stay for the spectator.
 if (VIEWER) {
-  for (const el of [ui.startPlay, ui.startMode, ui.runOfferPlay, ui.runOfferLater,
-                    ui.courseBtn, ui.watchBtn, ui.shareBtn, ui.modeBtn, ui.retry]) {
+  for (const el of [ui.startPlay, ui.startMode, ui.startCourse, ui.startRuns,
+                    ui.startShare, ui.runOfferPlay, ui.runOfferLater,
+                    ui.menuBtn, ui.retry]) {
     el.classList.add('hidden');
   }
   document.getElementById('startTag').textContent =
