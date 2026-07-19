@@ -1326,7 +1326,7 @@ function swingDie() {
     return;
   }
 
-  // three unattended spawn-falls in a row -> stop auto-restarting
+  // two unattended spawn-falls in a row -> stop auto-restarting
   swing.idleDeaths = swing.acted ? 0 : swing.idleDeaths + 1;
   const m = Math.round(swing.dist);
 
@@ -1403,7 +1403,7 @@ function swingTick(dt) {
       } else if (swing.pendingBestShare) {
         swing.pendingBestShare = false;
         showBestPrompt();                   // new best: offer to share the run
-      } else if (swing.idleDeaths >= 3) {
+      } else if (swing.idleDeaths >= 2) {
         // attention is clearly elsewhere: stop the restart treadmill
         swing.awaitTap = true;
         flash('STILL THERE? TAP TO CONTINUE', COLORS.BIN, 9999999);
