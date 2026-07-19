@@ -378,11 +378,10 @@
       <div id="seedTitle">COURSE SEED</div>
       <input id="seedInput" type="text" maxlength="8000" autocomplete="off"
              autocapitalize="characters" placeholder="PHRASE &middot; OR PASTE A RUN LINK">
-      <div id="seedHint">SAME PHRASE = SAME COURSE ON EVERY DEVICE.<br>SHARE IT AND COMPARE BEST DISTANCE.<br>REPLAY ANY DAILY LATER: TYPE ITS PHRASE,<br>E.G. &ldquo;DAILY 2026-07-11&rdquo;<br>PASTE A RUN CODE OR LINK TO WATCH A FRIEND'S RUN.</div>
+      <div id="seedHint">SAME PHRASE = SAME COURSE ON EVERY DEVICE.<br>SHARE IT AND COMPARE BEST DISTANCE.<br>REPLAY ANY DAILY LATER: TYPE ITS PHRASE,<br>E.G. &ldquo;DAILY 2026-07-11&rdquo;</div>
       <div id="seedBtns">
         <button id="seedDaily" type="button">DAILY</button>
         <button id="seedRandom" type="button">RANDOM</button>
-        <button id="seedCopyRun" type="button">RUN CODE</button>
         <button id="seedApply" type="button">PLAY</button>
       </div>
     </div>
@@ -508,7 +507,7 @@ const ui = {
   wreckShare: $('wreckShare'), wreckVideo: $('wreckVideo'),
   seedModal: $('seedModal'), seedInput: $('seedInput'),
   seedDaily: $('seedDaily'), seedRandom: $('seedRandom'),
-  seedApply: $('seedApply'), seedCopyRun: $('seedCopyRun'),
+  seedApply: $('seedApply'),
   runOffer: $('runOffer'), runOfferText: $('runOfferText'),
   runOfferWatch: $('runOfferWatch'), runOfferPlay: $('runOfferPlay'),
   runOfferLater: $('runOfferLater'), runOfferShare: $('runOfferShare'),
@@ -2590,9 +2589,6 @@ function recordReplayVideo(rep, opts = {}) {
 // URL; in the native app it targets SHARE_URL — the App Links domain, so
 // Android with the app installed opens the app itself (see appUrlOpen at
 // the bottom) and everyone else gets the hosted web game.
-function b64urlEncode(s) {
-  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
 function b64urlDecode(s) {
   try { return atob(s.replace(/-/g, '+').replace(/_/g, '/')); } catch (e) { return ''; }
 }
@@ -2611,13 +2607,6 @@ function shareBase() {
 // redundant next to the footage.
 function courseLink(course) {
   return `${shareBase()}?c=${encodeURIComponent(course)}`;
-}
-
-// Legacy: pre-trajectory links embedded the replay. Still parsed on open.
-function runLink(course) {
-  const code = (store.data.apex_swing.courseReplay || {})[course];
-  if (!code || code.length > 1200) return null;   // never build a mangled URL
-  return `${shareBase()}#r=${b64urlEncode(code)}`;
 }
 
 // Accepts a full deep link, a bare #r= fragment, or a raw PA1: code.
@@ -2669,23 +2658,6 @@ function checkSharedRunLink() {
   }
   try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
   showRunOffer(rep);
-}
-
-// Copies the COURSE link. Trajectory recordings are kilobytes — far too big
-// for a URL — so the run travels as video and the link carries the challenge.
-function copyRunCode(course) {
-  const link = courseLink(course);
-  const done = () => flash('COURSE LINK COPIED · SEND IT', COLORS.GOOD);
-  try {
-    navigator.clipboard.writeText(link).then(done, () => {
-      ui.seedInput.value = link;   // fallback: surface it for manual copy
-      ui.seedInput.select();
-      flash('COPY THE LINK FROM THE BOX', COLORS.BIN);
-    });
-  } catch (e) {
-    ui.seedInput.value = link;
-    flash('COPY THE LINK FROM THE BOX', COLORS.BIN);
-  }
 }
 
 /* ============================================================================
@@ -3376,10 +3348,6 @@ ui.seedApply.addEventListener('pointerup', () => {
   }
   applyCourse(raw.toUpperCase().replace(/\s+/g, ' ').slice(0, 24) || null);
 });
-ui.seedCopyRun.addEventListener('pointerup', () => {
-  const v = ui.seedInput.value.trim().toUpperCase().replace(/\s+/g, ' ');
-  copyRunCode(v || currentCourseName());
-});
 ui.seedInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') ui.seedApply.dispatchEvent(new Event('pointerup'));
 });
@@ -3593,7 +3561,7 @@ window.__arcade = {
   renderShareCard, shareScore, decodeReplay, playReplay,
   encodeTrajectory, decodeTrajectory, shareRunText, courseLink,
   recordReplayVideo, videoRec,
-  extractReplay, runLink, showRunOffer, genTo, sectionAtM, native, sfx, THEMES, fs,
+  extractReplay, showRunOffer, genTo, sectionAtM, native, sfx, THEMES, fs,
   view: () => ({ VS, VIEW_W, vsT }),
   mode: () => started ? 'swing' : 'start',
 };
