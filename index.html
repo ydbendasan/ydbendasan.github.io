@@ -316,7 +316,7 @@
 
   <div id="start">
     <div id="startTitle">PEG<em>JUMP</em></div>
-    <div id="startTag">HOLD = SWING &amp; PUMP &middot; RELEASE = FLY &middot; DON'T STOP</div>
+    <div id="startTag">HOLD = SWING &amp; JET &middot; RELEASE = FLY &middot; DON'T STOP</div>
     <div id="startInfo"></div>
     <button id="startPlay" type="button">TAP TO PLAY</button>
     <button id="startCourse" type="button">COURSE</button>
@@ -400,7 +400,7 @@
 <script>
 /* ============================================================================
    PEGJUMP — one-button endless pendulum. Hold to lasso the nearest peg
-   ahead, pump the swing, release to fly. Seeded courses, shareable replays.
+   ahead, jet the swing forward, release to fly. Seeded courses, shareable replays.
    Vanilla JS + HTML5 Canvas + Matter.js. Local-first: no network, no backend.
    ============================================================================ */
 (() => {
@@ -1802,11 +1802,11 @@ function swingTick(dt) {
     }
   }
 
-  // Pumping: holding the rope feeds energy into the swing. It amplifies the
-  // current swing direction (back-and-forth builds amplitude, playground
-  // style) and kicks a stalled pendulum forward, so bottoming out on a grab
-  // never strands the player. The winch reels the rope in while held, adding
-  // energy the way a skater pulls their arms in.
+  // Holding the rope feeds energy into the swing via the jet (see jetAction):
+  // a forward thruster that fires on the forward stroke only and kicks a
+  // stalled pendulum forward, so bottoming out on a grab never strands the
+  // player. The backswing is pure momentum. The winch reels the rope in while
+  // held, adding energy the way a skater pulls their arms in.
   if (swing.rope && swing.ropePeg && !isTrajPlayback()) {   // no forces in playback
     const peg = swing.ropePeg;
     const rx = a.position.x - peg.x, ry = a.position.y - peg.y;
@@ -1820,8 +1820,8 @@ function swingTick(dt) {
     swing.rope.stiffness =
       (rl >= swing.rope.length - 1 && ry > -8) ? S.ROPE_STIFFNESS : 0;
 
-    // Pumping fades toward horizontal and cuts off past ~75 degrees — you
-    // can't pump yourself over the bar. Above the peg, the (slack) rope
+    // Thrust fades toward horizontal and cuts off past ~75 degrees — you
+    // can't jet yourself over the bar. Above the peg, the (slack) rope
     // bleeds speed, so ballistic overshoot can't crest the anchor either.
     const belowness = clamp(ry / rl, 0, 1);   // 1 straight below, 0 at horizontal
     if (ry < 0) {
@@ -1829,19 +1829,15 @@ function swingTick(dt) {
     } else if (belowness < 0.15) {
       Body.setVelocity(a, { x: a.velocity.x * 0.93, y: a.velocity.y * 0.93 });
     }
-    const tx = -ry / rl, ty = rx / rl;             // unit tangent of the arc
-    const vt = a.velocity.x * tx + a.velocity.y * ty;
-    // Resonance pumping: push with the motion. The stall kick fires only near
-    // the bottom of the arc — kicking elsewhere creates a stable hang-point
-    // partway up the forward swing where pump exactly cancels gravity.
-    const nearBottom = Math.abs(rx) / rl < 0.2;
-    const dir = Math.abs(vt) > S.STALL_SPEED
-      ? Math.sign(vt)                              // amplify the current swing
-      : (nearBottom ? (tx >= 0 ? 1 : -1) : 0);     // stalled off-bottom: let gravity work
-    if (dir && belowness > 0.35 && Math.hypot(a.velocity.x, a.velocity.y) < S.PUMP_MAX_SPEED) {
+    // The jetpack is the swing's only energy input (see jetAction): a forward
+    // thruster that fires on the forward stroke and kicks a dead hang forward,
+    // never on the backswing. The force we apply here is exactly what the
+    // visible flame is burning — one action, not a hidden pump plus a flame.
+    const jet = jetAction();
+    if (jet.thrusting) {
       Body.applyForce(a, a.position, {
-        x: tx * dir * a.mass * S.PUMP_FORCE * belowness,
-        y: ty * dir * a.mass * S.PUMP_FORCE * belowness,
+        x: jet.tx * jet.dir * a.mass * S.PUMP_FORCE * jet.belowness,
+        y: jet.ty * jet.dir * a.mass * S.PUMP_FORCE * jet.belowness,
       });
     }
     // winch only in the lower half of the arc, so reeling in can't feed the crest
@@ -1983,32 +1979,42 @@ function swingRender() {
 }
 
 /* ---- stick figure: pose derived from physics state, no extra bodies ---- */
-// Jetpack — the visible story for the sim's pump force (render-only; the
-// physics is untouched). The figure wears a small pack that fires thruster
-// bursts, but only on pushes with a clear forward component and only while
-// the swing is weak: a dead hang gets an obvious full-power rescue burn, a
-// full-speed swing gets nothing, and the backstroke always reads as coasting.
-function jetState() {
-  if (!swing.rope || !swing.ropePeg || !swing.avatar) return { firing: false, power: 0 };
+// The jetpack IS the swing's energy input — one action, not a hidden "pump"
+// plus a cosmetic flame. It fires a forward thruster on the forward stroke
+// (and kicks a dead hang forward off the bottom), never on the backswing:
+// the backstroke is pure momentum and reads as coasting. Both the physics
+// thrust and the visible burn read from this one decision, so what you see
+// firing is exactly what's pushing you. `thrusting` gates the force; `firing`
+// pulses the flame; `power` scales the burn (full on a dead hang, nothing near
+// top speed). tx/ty/dir/belowness hand the thrust vector back to the physics.
+function jetAction() {
+  const idle = { firing: false, thrusting: false, power: 0, dir: 0, tx: 0, ty: 0, belowness: 0 };
+  if (!swing.rope || !swing.ropePeg || !swing.avatar) return idle;
   const S = CONFIG.SWING;
   const p = swing.avatar.position, v = swing.avatar.velocity;
   const speed = Math.hypot(v.x, v.y);
   const rxs = p.x - swing.ropePeg.x, rys = p.y - swing.ropePeg.y;
   const rl = Math.hypot(rxs, rys) || 1;
-  const tx = -rys / rl, ty = rxs / rl;
+  const tx = -rys / rl, ty = rxs / rl;             // unit tangent of the arc
   const vt = v.x * tx + v.y * ty;
   const belowness = clamp(rys / rl, 0, 1);
   const nearBottom = Math.abs(rxs) / rl < 0.2;
+  // Resonance: push with the motion. The stall kick fires only near the bottom
+  // — kicking elsewhere creates a stable hang-point partway up the arc where
+  // thrust exactly cancels gravity.
   const dir = Math.abs(vt) > S.STALL_SPEED
-    ? Math.sign(vt)
-    : (nearBottom ? (tx >= 0 ? 1 : -1) : 0);
-  if (!dir || belowness <= 0.35 || speed >= S.PUMP_MAX_SPEED) return { firing: false, power: 0 };
-  if (tx * dir <= 0.3) return { firing: false, power: 0 };   // backstroke: coast
-  const deadness = 1 - speed / S.PUMP_MAX_SPEED;
-  if (deadness < 0.25) return { firing: false, power: 0 };   // strong swing: no help
-  // short pulsed burns rather than a continuous torch
+    ? Math.sign(vt)                                // follow the current swing
+    : (nearBottom ? (tx >= 0 ? 1 : -1) : 0);       // stalled off-bottom: coast
+  // Forward-only: the thrust must have a clear forward (+x, toward travel)
+  // component. On the backswing tx*dir goes negative and the jet coasts —
+  // this is the single gate that keeps every energy input on the forward arc.
+  if (!dir || tx * dir <= 0.3 || belowness <= 0.35 || speed >= S.PUMP_MAX_SPEED) {
+    return { ...idle, dir, tx, ty, belowness };
+  }
+  const power = 1 - speed / S.PUMP_MAX_SPEED;
+  // short pulsed burns for the flame; the thrust itself is steady
   const firing = (state.time % 0.5) < 0.32;
-  return { firing, power: deadness };
+  return { firing, thrusting: true, power, dir, tx, ty, belowness };
 }
 
 function stickPose() {
@@ -2067,7 +2073,7 @@ function stickPose() {
   // exhaust pointing backward so its thrust reads as pushing him forward
   let bnx = -uy, bny = ux;
   if (bnx > 0) { bnx = -bnx; bny = -bny; }
-  const jet = jetState();
+  const jet = jetAction();
   jet.x = (sho.x + hip.x) / 2 + bnx * 4.5;
   jet.y = (sho.y + hip.y) / 2 + bny * 4.5;
   jet.ax = bnx; jet.ay = bny;         // exhaust direction
@@ -3192,7 +3198,7 @@ function enterSwing() {
   swing.idleDeaths = 0;
   resetRun();
   updateSwingHud();
-  if (store.data.apex_swing.runs === 0) flash('HOLD = SWING & PUMP · RELEASE = FLY', COLORS.SHAPES[1]);
+  if (store.data.apex_swing.runs === 0) flash('HOLD = SWING & JET · RELEASE = FLY', COLORS.SHAPES[1]);
   else flash(swing.courseName, COLORS.SHAPES[1]);
 }
 
