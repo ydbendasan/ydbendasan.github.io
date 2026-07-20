@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#070b14">
-<title>Apex Swing</title>
+<title>PegJump</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='11' cy='4' r='2' fill='%2327e8ff'/%3E%3Cline x1='11' y1='4' x2='6' y2='13' stroke='%23ffb42e' stroke-width='2'/%3E%3C/svg%3E">
 <style>
   :root {
@@ -315,7 +315,7 @@
   <div id="flash"></div>
 
   <div id="start">
-    <div id="startTitle">APEX<em>SWING</em></div>
+    <div id="startTitle">PEG<em>JUMP</em></div>
     <div id="startTag">HOLD = SWING &amp; PUMP &middot; RELEASE = FLY &middot; DON'T STOP</div>
     <div id="startInfo"></div>
     <button id="startPlay" type="button">TAP TO PLAY</button>
@@ -399,7 +399,7 @@
 </script>
 <script>
 /* ============================================================================
-   APEX SWING — one-button endless pendulum. Hold to lasso the nearest peg
+   PEGJUMP — one-button endless pendulum. Hold to lasso the nearest peg
    ahead, pump the swing, release to fly. Seeded courses, shareable replays.
    Vanilla JS + HTML5 Canvas + Matter.js. Local-first: no network, no backend.
    ============================================================================ */
@@ -1121,7 +1121,7 @@ const audio = {
   },
 
 
-  // Subtle air rush that tracks the avatar's speed (Apex Swing). Deliberately
+  // Subtle air rush that tracks the avatar's speed (PegJump). Deliberately
   // quiet and dark — the excitement lives in the discrete woohoo/yeehaw
   // exclamations, not in a continuous tone (a gliding vowel drone reads as a
   // ghost moaning; loud bright noise reads as static).
@@ -1881,7 +1881,7 @@ function swingTick(dt) {
   updateSwingHud();
 }
 
-/* ---- Apex Swing rendering (world scrolls, HUD stays) ---- */
+/* ---- PegJump rendering (world scrolls, HUD stays) ---- */
 function swingRender() {
   // parallax grid: two offset blits of the cached background (scaled by VS so
   // the backdrop's scroll speed tracks the world zoom)
@@ -2532,11 +2532,11 @@ function drawVideoIntro(g, VW, VH, rep, alpha) {
   g.textAlign = 'center';
   const s = VW / 1080;   // scale typography off the portrait reference
   g.font = `800 ${Math.round(86 * s)}px ${mono}`;
-  const w1 = g.measureText('APEX ').width, w2 = g.measureText('SWING').width;
+  const w1 = g.measureText('PEG').width, w2 = g.measureText('JUMP').width;
   g.textAlign = 'left';
   g.shadowColor = 'rgba(39,232,255,.75)'; g.shadowBlur = 30 * s;
-  g.fillStyle = '#ffffff'; g.fillText('APEX ', (VW - w1 - w2) / 2, VH * 0.4);
-  g.fillStyle = COLORS.BIN; g.fillText('SWING', (VW - w1 - w2) / 2 + w1, VH * 0.4);
+  g.fillStyle = '#ffffff'; g.fillText('PEG', (VW - w1 - w2) / 2, VH * 0.4);
+  g.fillStyle = COLORS.BIN; g.fillText('JUMP', (VW - w1 - w2) / 2 + w1, VH * 0.4);
   g.shadowBlur = 0;
   g.textAlign = 'center';
   g.fillStyle = 'rgba(39,232,255,.85)'; g.font = `700 ${Math.round(40 * s)}px ${mono}`;
@@ -2558,7 +2558,7 @@ function drawVideoOutro(g, VW, VH, alpha) {
   g.fillStyle = '#ffffff'; g.font = `800 ${Math.round(58 * s)}px ${mono}`;
   g.fillText('BEAT MY DISTANCE', VW / 2, VH * 0.44);
   g.fillStyle = COLORS.GOOD; g.font = `800 ${Math.round(58 * s)}px ${mono}`;
-  g.fillText('GET APEX SWING', VW / 2, VH * 0.52);
+  g.fillText('GET PEGJUMP', VW / 2, VH * 0.52);
   g.fillStyle = 'rgba(39,232,255,.9)'; g.font = `700 ${Math.round(40 * s)}px ${mono}`;
   g.fillText(CONFIG.SHARE_URL.replace('https://', '').replace(/\/$/, ''), VW / 2, VH * 0.62);
   g.restore();
@@ -2842,14 +2842,14 @@ function renderShareCard() {
   for (let p = 60; p < S; p += 120) { g.moveTo(p, 0); g.lineTo(p, S); g.moveTo(0, p); g.lineTo(S, p); }
   g.stroke();
 
-  // title: APEX (white) SWING (cyan)
+  // title: PEG (white) JUMP (cyan)
   g.font = `800 92px ${mono}`;
-  const w1 = g.measureText('APEX ').width, w2 = g.measureText('SWING').width;
+  const w1 = g.measureText('PEG').width, w2 = g.measureText('JUMP').width;
   const tx = (S - w1 - w2) / 2;
   g.textAlign = 'left';
   g.shadowColor = 'rgba(39,232,255,.75)'; g.shadowBlur = 34;
-  g.fillStyle = '#ffffff'; g.fillText('APEX ', tx, 156);
-  g.fillStyle = COLORS.BIN; g.fillText('SWING', tx + w1, 156);
+  g.fillStyle = '#ffffff'; g.fillText('PEG', tx, 156);
+  g.fillStyle = COLORS.BIN; g.fillText('JUMP', tx + w1, 156);
   g.shadowBlur = 0;
   g.textAlign = 'center';
 
@@ -2920,7 +2920,7 @@ function renderShareCard() {
   }
 
   g.fillStyle = '#cfe9ff'; g.font = `700 36px ${mono}`;
-  g.fillText('BEAT MY DISTANCE · GET APEX SWING', S / 2, 900);
+  g.fillText('BEAT MY DISTANCE · GET PEGJUMP', S / 2, 900);
   g.fillStyle = '#ffffff'; g.font = `700 40px ${mono}`;
   g.fillText(CONFIG.SHARE_URL.replace('https://', '').replace(/\/$/, ''), S / 2, 1000);
   return cv;
@@ -2929,7 +2929,7 @@ function renderShareCard() {
 // The one share sentence, for any course — the card, the video, and the
 // run-offer SHARE RUN all speak with the same voice.
 function shareRunText(course, best) {
-  return `${best} m on “${course}” in Apex Swing — tap to play the same course and beat it: ${courseLink(course)}`;
+  return `${best} m on “${course}” in PegJump — tap to play the same course and beat it: ${courseLink(course)}`;
 }
 
 function shareText() {
@@ -2962,14 +2962,14 @@ function shareScore() {
   if (best <= 0) { flash('SET A DISTANCE FIRST', COLORS.BAD); return; }
   const text = shareText();
   renderShareCard().toBlob(async (blob) => {
-    const file = blob && new File([blob], 'apex-swing-best.png', { type: 'image/png' });
+    const file = blob && new File([blob], 'pegjump-best.png', { type: 'image/png' });
     // Native app (Capacitor): write the card to the cache and hand its file
     // URI to the OS share sheet. This is the reliable path inside a WebView,
     // where the Web Share API's file support is spotty.
     if (native.on && native.Share && native.Filesystem && blob) {
       try {
         const base64 = await blobToBase64(blob);
-        const name = 'apex-swing-best.png';
+        const name = 'pegjump-best.png';
         await native.Filesystem.writeFile({ path: name, data: base64, directory: 'CACHE' });
         const { uri } = await native.Filesystem.getUri({ path: name, directory: 'CACHE' });
         await native.Share.share({ text, files: [uri], dialogTitle: 'Share your run' });
@@ -2998,7 +2998,7 @@ function shareScore() {
     if (blob) {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'apex-swing-best.png';
+      a.download = 'pegjump-best.png';
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
       saved = true;
@@ -3018,7 +3018,7 @@ function shareScore() {
    ============================================================================ */
 async function shareVideoFile({ blob, mime }) {
   const ext = mime.includes('mp4') ? 'mp4' : 'webm';
-  const name = `apex-swing-run.${ext}`;
+  const name = `pegjump-run.${ext}`;
   const text = shareText();
   if (native.on && native.Share && native.Filesystem) {
     try {
