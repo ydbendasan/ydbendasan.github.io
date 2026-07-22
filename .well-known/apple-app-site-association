@@ -1,0 +1,15 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["XDK38XV37M.com.ydbendasan.apexswing"],
+        "components": [
+          {
+            "/": "*",
+            "comment": "Open the app for any ydbendasan.github.io link (mirrors the Android App Links host match). Share links are https://ydbendasan.github.io/?c=<course-phrase>."
+          }
+        ]
+      }
+    ]
+  }
+}
