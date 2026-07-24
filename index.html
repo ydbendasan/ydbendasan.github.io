@@ -3722,6 +3722,12 @@ store.load();
 runs.load();   // async: recordings arrive shortly after boot
 // Retire the old arcade/retro/toy theme names from any existing save.
 if (!THEMES.includes(store.data.settings.theme)) { store.data.settings.theme = 'rhythm'; store.save(); }
+// Every launch defaults to today's daily course. A custom or shared phrase
+// (or a stale "DAILY <old-date>") from a previous session shouldn't carry
+// over — the title screen should always land on today's daily. A shared link
+// opened on launch overrides this: checkSharedCourseLink() runs later in boot.
+store.data.apex_swing.course = null;
+store.save();
 updateSoundBtn();
 updateThemeBtn();
 updateModeBtns();
