@@ -283,6 +283,12 @@
   #wreckBtns button:active { background: rgba(255,255,255,.12); }
   #wreckAgain { border-color: rgba(255,255,255,.55) !important; color: #fff !important; font-weight: 700; }
   #wreckShare, #wreckVideo { border-color: var(--good) !important; color: var(--good) !important; }
+  #wreckQuit {
+    background: transparent; border: 1px solid rgba(255,61,110,.45);
+    color: #ff3d6e; font-family: var(--mono); font-size: 11px; letter-spacing: 1.5px;
+    padding: 11px 0; border-radius: 6px; touch-action: manipulation;
+  }
+  #wreckQuit:active { background: rgba(255,61,110,.12); }
   .hidden { display: none !important; }
 </style>
 </head><body>
@@ -370,6 +376,7 @@
         <button id="wreckShare" type="button">SHARE CARD</button>
         <button id="wreckVideo" type="button">SHARE VIDEO</button>
       </div>
+      <button id="wreckQuit" type="button">EXIT TO TITLE</button>
     </div>
   </div>
 
@@ -504,7 +511,7 @@ const ui = {
   themeBtn: $('themeBtn'), soundBtn: $('soundBtn'), modeBtn: $('modeBtn'),
   wreckCard: $('wreckCard'), wreckTitle: $('wreckTitle'), wreckText: $('wreckText'),
   wreckHint: $('wreckHint'), wreckAgain: $('wreckAgain'),
-  wreckShare: $('wreckShare'), wreckVideo: $('wreckVideo'),
+  wreckShare: $('wreckShare'), wreckVideo: $('wreckVideo'), wreckQuit: $('wreckQuit'),
   seedModal: $('seedModal'), seedInput: $('seedInput'),
   seedDaily: $('seedDaily'), seedRandom: $('seedRandom'),
   seedApply: $('seedApply'),
@@ -3512,6 +3519,12 @@ ui.wreckVideo.addEventListener('pointerup', (e) => {
   e.stopPropagation();
   audio.unlock(); sfx.tick();
   startVideoShare();
+});
+ui.wreckQuit.addEventListener('pointerup', (e) => {
+  e.stopPropagation();
+  ui.wreckCard.classList.add('hidden');
+  sfx.tick();
+  returnToStart();
 });
 
 /* ---- in-game menu ---- */
