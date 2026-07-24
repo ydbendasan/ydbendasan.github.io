@@ -249,7 +249,7 @@
   #storeLinks, #runOfferStore { display: flex; flex-direction: column; gap: 12px; }
   #storeLinks { margin-top: 26px; }
   #runOfferStore { margin-top: 2px; }
-  .playLink, .itchLink {
+  .playLink, .itchLink, .discordLink, .comingSoon {
     font-family: var(--mono); font-size: 13px; letter-spacing: 3px; text-align: center;
     text-decoration: none; padding: 13px 26px; border-radius: 6px; touch-action: manipulation;
   }
@@ -257,6 +257,9 @@
   .playLink:active { background: rgba(182,255,46,.15); }
   .itchLink { color: var(--neon); border: 1px solid rgba(39,232,255,.45); font-size: 11px; }
   .itchLink:active { background: rgba(39,232,255,.15); }
+  .discordLink { color: #8b93f8; border: 1px solid rgba(88,101,242,.6); font-size: 11px; }
+  .discordLink:active { background: rgba(88,101,242,.15); }
+  .comingSoon { color: rgba(255,255,255,.4); border: 1px dashed rgba(255,255,255,.2); font-size: 11px; cursor: default; }
 
   /* ---------------- Wreck card (end-of-run beat) ---------------- */
   #wreckCard {
@@ -331,7 +334,10 @@
     <button id="startMode" type="button">MODE &middot; NORMAL</button>
     <div id="storeLinks" class="hidden">
       <a id="playStoreLink" class="playLink" href="https://play.google.com/store/apps/details?id=com.ydbendasan.apexswing">GET THE APP &middot; GOOGLE PLAY</a>
+      <!-- Once approved, restore: <a class="playLink" href="https://apps.apple.com/app/id6793646569">GET THE APP &middot; APP STORE</a> -->
+      <span class="comingSoon">APP STORE &middot; COMING SOON</span>
       <a id="itchLink" class="itchLink" href="https://ydbendasan.itch.io/perfect-arcade">PLAY IN BROWSER &middot; ITCH.IO</a>
+      <a id="discordLink" class="discordLink" href="https://discord.gg/e25skUcyw">JOIN THE COMMUNITY &middot; DISCORD</a>
     </div>
   </div>
 
@@ -351,7 +357,9 @@
       </div>
       <div id="runOfferStore" class="hidden">
         <a class="playLink" href="https://play.google.com/store/apps/details?id=com.ydbendasan.apexswing">GET THE APP &middot; GOOGLE PLAY</a>
+        <span class="comingSoon">APP STORE &middot; COMING SOON</span>
         <a class="itchLink" href="https://ydbendasan.itch.io/perfect-arcade">PLAY IN BROWSER &middot; ITCH.IO</a>
+        <a class="discordLink" href="https://discord.gg/e25skUcyw">JOIN THE COMMUNITY &middot; DISCORD</a>
       </div>
     </div>
   </div>
@@ -3728,7 +3736,7 @@ if (VIEWER) {
     el.classList.add('hidden');
   }
   document.getElementById('startTag').textContent =
-    'WATCH SHARED RUNS HERE · GET THE APP TO PLAY';
+    'ONE-TOUCH ENDLESS SWING · GET THE APP TO PLAY';
   document.getElementById('runOfferHint').textContent =
     'WATCH IT REPLAYED · GET THE APP TO PLAY IT YOURSELF.';
   document.getElementById('storeLinks').classList.remove('hidden');
