@@ -1371,12 +1371,43 @@ function hashSeed(str) {
   return (h ^= h >>> 16) >>> 0;
 }
 
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function dailyCourseName() {
-  return 'DAILY ' + new Date().toISOString().slice(0, 10);
+  return 'DAILY ' + todayKey();
 }
 
 function currentCourseName() {
   return store.data.apex_swing.course || dailyCourseName();
+}
+
+// A course the player arrived on through a shared link (a ?c= course link, a
+// run link, or a pasted run code) — the one course a resume must not swap out
+// from under them. Held only for the day it was opened: come back tomorrow and
+// it's tomorrow's daily again.
+let linkCourse = null, linkCourseDay = '';
+function markLinkCourse(phrase) { linkCourse = phrase; linkCourseDay = todayKey(); }
+
+let refreshedDay = '';   // the day the title screen was last pointed at
+
+// The title screen always points at *today's* daily. Called on launch, on
+// every return to the front, and while idling on the title screen — a
+// launch-only reset isn't enough, because phones resume the app (the page can
+// stay alive for days) far more often than they relaunch it, so the course
+// from whichever day the app was last opened would stick around.
+// Never fires mid-run, and never steals a link course opened earlier today.
+function refreshDailyCourse() {
+  if (started) return;                     // mid-run: no swapping underfoot
+  const today = todayKey();
+  const held = store.data.apex_swing.course;
+  if (held && !(held === linkCourse && linkCourseDay === today)) {
+    store.data.apex_swing.course = null;   // null = today's daily
+    store.save();
+  }
+  refreshedDay = today;
+  updateStart();   // the daily's own name rolls over at midnight too
 }
 
 const SEED_WORDS_A = ['NEON', 'TURBO', 'GAMMA', 'HYPER', 'SOLAR', 'VOLT', 'NOVA', 'QUANTUM', 'RETRO', 'CHROME'];
@@ -2438,6 +2469,7 @@ function decodeReplay(str) {
 
 function playReplay(rep) {
   store.data.apex_swing.course = rep.course;
+  if (rep.fromLink) markLinkCourse(rep.course);
   store.save();
   enterSwing();          // (re)start on the replay's course, then hand to playback
   if (rep.kind === 'traj') {
@@ -2827,6 +2859,7 @@ function checkSharedCourseLink(url) {
   try { phrase = decodeURIComponent(m[1].replace(/\+/g, ' ')).trim(); } catch (e) { return false; }
   if (!phrase) return false;
   store.data.apex_swing.course = phrase;
+  markLinkCourse(phrase);   // survives a resume today; not tomorrow
   store.save();
   try { history.replaceState(null, '', location.pathname); } catch (e) {}
   updateStart();
@@ -2844,6 +2877,7 @@ function checkSharedRunLink() {
     return;
   }
   try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  rep.fromLink = true;
   showRunOffer(rep);
 }
 
@@ -3226,6 +3260,7 @@ function updateStart() {
 
 function applyCourse(phrase) {
   store.data.apex_swing.course = phrase;   // null = daily
+  linkCourse = null;   // the player picked this one; a resume returns to daily
   store.save();
   ui.seedModal.classList.add('hidden');
   audio.unlock();
@@ -3557,6 +3592,7 @@ ui.seedApply.addEventListener('pointerup', () => {
     const rep = extractReplay(raw);
     if (!rep) { flash('BAD RUN CODE', COLORS.BAD); return; }
     ui.seedModal.classList.add('hidden');
+    rep.fromLink = true;   // a friend's link, pasted instead of tapped
     showRunOffer(rep);
     return;
   }
@@ -3583,6 +3619,7 @@ ui.runOfferPlay.addEventListener('pointerup', () => {
   if (!rep) return;
   audio.unlock(); sfx.tick();
   store.data.apex_swing.course = rep.course;
+  if (rep.fromLink) markLinkCourse(rep.course);
   store.save();
   enterSwing();
 });
@@ -3674,12 +3711,19 @@ window.addEventListener('resize', () => {
    Main loop — fixed 60 Hz simulation, render every animation frame
    ============================================================================ */
 const STEP = 1000 / 60;
-let last = performance.now(), acc = 0;
+let last = performance.now(), acc = 0, dailyCheckAt = 0;
 
 function frame(now) {
   requestAnimationFrame(frame);
   let dtMs = now - last;
   last = now;
+  // Left open on the title screen across midnight: roll to the new daily. Only
+  // the rollover — idling isn't launching or resuming, so a course the player
+  // picked this session must survive sitting on the title screen.
+  if (!started && now - dailyCheckAt > 30000) {
+    dailyCheckAt = now;
+    if (todayKey() !== refreshedDay) refreshDailyCourse();
+  }
   if (dtMs > 100) dtMs = 100;   // tab-switch guard
   if (videoRec.active) dtMs *= videoRec.timeScale;   // replay→video time-warp
   // advance the rotation zoom tween (~0.7s ease-in-out); VIEW_W tracks the
@@ -3722,12 +3766,11 @@ store.load();
 runs.load();   // async: recordings arrive shortly after boot
 // Retire the old arcade/retro/toy theme names from any existing save.
 if (!THEMES.includes(store.data.settings.theme)) { store.data.settings.theme = 'rhythm'; store.save(); }
-// Every launch defaults to today's daily course. A custom or shared phrase
-// (or a stale "DAILY <old-date>") from a previous session shouldn't carry
-// over — the title screen should always land on today's daily. A shared link
-// opened on launch overrides this: checkSharedCourseLink() runs later in boot.
-store.data.apex_swing.course = null;
-store.save();
+// Land on today's daily: a custom or shared phrase (or a stale
+// "DAILY <old-date>") from a previous session shouldn't carry over. A shared
+// link opened on launch overrides this — checkSharedCourseLink() runs later
+// in boot. The same check re-runs on every resume (see below).
+refreshDailyCourse();
 updateSoundBtn();
 updateThemeBtn();
 updateModeBtns();
@@ -3765,13 +3808,65 @@ if (native.on && native.App) {
     if (!url) return;
     if (checkSharedCourseLink(url)) return;   // ?c= course link
     const rep = extractReplay(url);
-    if (rep) showRunOffer(rep);
+    if (rep) { rep.fromLink = true; showRunOffer(rep); }
     else if (/[#&?]r=/.test(url)) flash('RUN LINK UNREADABLE — GET THE FULL LINK', COLORS.BAD, 2400);
   };
   try {
     native.App.addListener('appUrlOpen', (e) => offerFromUrl(e && e.url));
     native.App.getLaunchUrl().then((r) => offerFromUrl(r && r.url), () => {});
   } catch (e) { /* plugin missing — links still work via paste */ }
+}
+
+// Back to the front — the resume path that matters most, since the app is
+// resumed far more often than it is relaunched. Native gets the OS lifecycle
+// event; the web gets tab visibility plus a bfcache restore. A link opening
+// the app at the same moment is safe in either order: the link handler marks
+// its course (so a later refresh keeps it), and a refresh that lands first is
+// overwritten by the link.
+if (native.on && native.App) {
+  try {
+    native.App.addListener('appStateChange', (s) => { if (s && s.isActive) refreshDailyCourse(); });
+  } catch (e) { /* plugin missing — visibilitychange still covers the WebView */ }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshDailyCourse(); });
+window.addEventListener('pageshow', () => refreshDailyCourse());
+
+// Android hardware back / back gesture. The OS hands it to JS, and with no
+// listener registered nothing happens on a single-page game — the button felt
+// dead. Unwind exactly one screen per press, the way every other Android app
+// does: dialog → pause menu → title screen → out of the app. Each branch
+// mirrors the on-screen control that already does that job, so back never
+// becomes a second, divergent route through the UI. Mid-run it pauses rather
+// than quitting outright: a stray press should never cost a run, and the menu
+// is still only one more press from the title.
+if (native.on && native.App) {
+  const shown = (el) => !el.classList.contains('hidden');
+  const back = () => {
+    if (videoRec.nativeStop) { videoRec.nativeStop(); return; }              // OS recorder: stop it
+    if (videoRec.active) { if (videoRec.abort) videoRec.abort(); return; }   // cancel the render
+    sfx.tick();
+    if (shown(ui.seedModal)) { ui.seedModal.classList.add('hidden'); return; }
+    if (shown(ui.runsModal)) { ui.runsModal.classList.add('hidden'); return; }
+    if (shown(ui.runOffer)) {                       // = LATER
+      pendingRunOffer = null;
+      ui.runOffer.classList.add('hidden');
+      if (started) returnToStart();
+      return;
+    }
+    if (shown(ui.wreckCard)) {                      // = QUIT
+      ui.wreckCard.classList.add('hidden');
+      returnToStart();
+      return;
+    }
+    if (shown(ui.menuModal)) { closeMenu(); returnToStart(); return; }       // = QUIT
+    if (started) {
+      if (swing.playback) { returnToStart(); return; }   // watching a replay: straight out
+      ui.menuModal.classList.remove('hidden');           // simPaused() freezes the run
+      return;
+    }
+    try { native.App.exitApp(); } catch (e) {}    // title screen: leave the app
+  };
+  try { native.App.addListener('backButton', back); } catch (e) { /* plugin missing */ }
 }
 requestAnimationFrame(frame);
 
