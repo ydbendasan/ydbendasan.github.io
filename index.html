@@ -249,7 +249,7 @@
   #storeLinks, #runOfferStore { display: flex; flex-direction: column; gap: 12px; }
   #storeLinks { margin-top: 26px; }
   #runOfferStore { margin-top: 2px; }
-  .playLink, .itchLink, .discordLink, .ytLink, .comingSoon {
+  .playLink, .itchLink, .discordLink, .ytLink {
     font-family: var(--mono); font-size: 13px; letter-spacing: 3px; text-align: center;
     text-decoration: none; padding: 13px 26px; border-radius: 6px; touch-action: manipulation;
   }
@@ -261,7 +261,6 @@
   .discordLink:active { background: rgba(88,101,242,.15); }
   .ytLink { color: #ff6b6b; border: 1px solid rgba(255,0,0,.5); font-size: 11px; }
   .ytLink:active { background: rgba(255,0,0,.15); }
-  .comingSoon { color: rgba(255,255,255,.4); border: 1px dashed rgba(255,255,255,.2); font-size: 11px; cursor: default; }
 
   /* ---------------- Wreck card (end-of-run beat) ---------------- */
   #wreckCard {
@@ -336,8 +335,7 @@
     <button id="startMode" type="button">MODE &middot; NORMAL</button>
     <div id="storeLinks" class="hidden">
       <a id="playStoreLink" class="playLink" href="https://play.google.com/store/apps/details?id=com.ydbendasan.apexswing" target="_blank" rel="noopener">GET THE APP &middot; GOOGLE PLAY</a>
-      <!-- Once approved, restore: <a class="playLink" href="https://apps.apple.com/app/id6793646569" target="_blank" rel="noopener">GET THE APP &middot; APP STORE</a> -->
-      <span class="comingSoon">APP STORE &middot; COMING SOON</span>
+      <a id="appStoreLink" class="playLink" href="https://apps.apple.com/app/id6793646569" target="_blank" rel="noopener">GET THE APP &middot; APP STORE</a>
       <a id="itchLink" class="itchLink" href="https://ydbendasan.itch.io/perfect-arcade" target="_blank" rel="noopener">PLAY IN BROWSER &middot; ITCH.IO</a>
       <a id="ytLink" class="ytLink" href="https://www.youtube.com/@PegJump" target="_blank" rel="noopener">WATCH DAILY RUNS &middot; YOUTUBE</a>
       <a id="discordLink" class="discordLink" href="https://discord.gg/e25skUcyw" target="_blank" rel="noopener">JOIN THE COMMUNITY &middot; DISCORD</a>
@@ -360,7 +358,7 @@
       </div>
       <div id="runOfferStore" class="hidden">
         <a class="playLink" href="https://play.google.com/store/apps/details?id=com.ydbendasan.apexswing" target="_blank" rel="noopener">GET THE APP &middot; GOOGLE PLAY</a>
-        <span class="comingSoon">APP STORE &middot; COMING SOON</span>
+        <a class="playLink" href="https://apps.apple.com/app/id6793646569" target="_blank" rel="noopener">GET THE APP &middot; APP STORE</a>
         <a class="itchLink" href="https://ydbendasan.itch.io/perfect-arcade" target="_blank" rel="noopener">PLAY IN BROWSER &middot; ITCH.IO</a>
         <a class="ytLink" href="https://www.youtube.com/@PegJump" target="_blank" rel="noopener">WATCH DAILY RUNS &middot; YOUTUBE</a>
         <a class="discordLink" href="https://discord.gg/e25skUcyw" target="_blank" rel="noopener">JOIN THE COMMUNITY &middot; DISCORD</a>
