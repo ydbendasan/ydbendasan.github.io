@@ -249,7 +249,7 @@
   #storeLinks, #runOfferStore { display: flex; flex-direction: column; gap: 12px; }
   #storeLinks { margin-top: 26px; }
   #runOfferStore { margin-top: 2px; }
-  .playLink, .itchLink, .discordLink, .ytLink {
+  .playLink, .itchLink, .discordLink, .ytLink, .comingSoon {
     font-family: var(--mono); font-size: 13px; letter-spacing: 3px; text-align: center;
     text-decoration: none; padding: 13px 26px; border-radius: 6px; touch-action: manipulation;
   }
@@ -261,6 +261,11 @@
   .discordLink:active { background: rgba(88,101,242,.15); }
   .ytLink { color: #ff6b6b; border: 1px solid rgba(255,0,0,.5); font-size: 11px; }
   .ytLink:active { background: rgba(255,0,0,.15); }
+  .comingSoon { color: rgba(255,255,255,.4); border: 1px dashed rgba(255,255,255,.2); font-size: 11px; cursor: default; }
+  /* The store the visitor can't install from: still reachable (they may be
+     passing the link on), just no longer the thing the eye lands on. Must
+     follow .playLink — same specificity, so source order decides. */
+  .storeAlt { color: rgba(207,233,255,.45); border-color: rgba(255,255,255,.16); font-size: 11px; }
 
   /* ---------------- Wreck card (end-of-run beat) ---------------- */
   #wreckCard {
@@ -334,9 +339,11 @@
     <button id="startShare" type="button">SHARE CARD</button>
     <button id="startMode" type="button">MODE &middot; NORMAL</button>
     <div id="storeLinks" class="hidden">
-      <a id="playStoreLink" class="playLink" href="https://play.google.com/store/apps/details?id=com.ydbendasan.apexswing" target="_blank" rel="noopener">GET THE APP &middot; GOOGLE PLAY</a>
-      <a id="appStoreLink" class="playLink" href="https://apps.apple.com/app/id6793646569" target="_blank" rel="noopener">GET THE APP &middot; APP STORE</a>
-      <a id="itchLink" class="itchLink" href="https://ydbendasan.itch.io/perfect-arcade" target="_blank" rel="noopener">PLAY IN BROWSER &middot; ITCH.IO</a>
+      <a id="appStoreLink" class="playLink" data-store="ios" href="https://apps.apple.com/app/id6793646569" target="_blank" rel="noopener">GET THE APP &middot; APP STORE</a>
+      <!-- Once it's live on Play, swap this span back for:
+           <a class="playLink" data-store="android" href="https://play.google.com/store/apps/details?id=com.ydbendasan.apexswing" target="_blank" rel="noopener">GET THE APP &middot; GOOGLE PLAY</a> -->
+      <span class="comingSoon" data-store="android" data-soon>GOOGLE PLAY &middot; COMING SOON</span>
+      <a id="itchLink" class="itchLink" data-browser href="https://ydbendasan.itch.io/perfect-arcade" target="_blank" rel="noopener">PLAY IN BROWSER &middot; ITCH.IO</a>
       <a id="ytLink" class="ytLink" href="https://www.youtube.com/@PegJump" target="_blank" rel="noopener">WATCH DAILY RUNS &middot; YOUTUBE</a>
       <a id="discordLink" class="discordLink" href="https://discord.gg/e25skUcyw" target="_blank" rel="noopener">JOIN THE COMMUNITY &middot; DISCORD</a>
     </div>
@@ -357,9 +364,9 @@
         <button id="runOfferLater" type="button">DISMISS</button>
       </div>
       <div id="runOfferStore" class="hidden">
-        <a class="playLink" href="https://play.google.com/store/apps/details?id=com.ydbendasan.apexswing" target="_blank" rel="noopener">GET THE APP &middot; GOOGLE PLAY</a>
-        <a class="playLink" href="https://apps.apple.com/app/id6793646569" target="_blank" rel="noopener">GET THE APP &middot; APP STORE</a>
-        <a class="itchLink" href="https://ydbendasan.itch.io/perfect-arcade" target="_blank" rel="noopener">PLAY IN BROWSER &middot; ITCH.IO</a>
+        <a class="playLink" data-store="ios" href="https://apps.apple.com/app/id6793646569" target="_blank" rel="noopener">GET THE APP &middot; APP STORE</a>
+        <span class="comingSoon" data-store="android" data-soon>GOOGLE PLAY &middot; COMING SOON</span>
+        <a class="itchLink" data-browser href="https://ydbendasan.itch.io/perfect-arcade" target="_blank" rel="noopener">PLAY IN BROWSER &middot; ITCH.IO</a>
         <a class="ytLink" href="https://www.youtube.com/@PegJump" target="_blank" rel="noopener">WATCH DAILY RUNS &middot; YOUTUBE</a>
         <a class="discordLink" href="https://discord.gg/e25skUcyw" target="_blank" rel="noopener">JOIN THE COMMUNITY &middot; DISCORD</a>
       </div>
@@ -562,6 +569,48 @@ const native = (() => {
 // links, not the free full game (that's itch's job). Same file ships
 // everywhere — the app and itch keep the full game; the hostname decides.
 const VIEWER = !native.on && /(^|\.)ydbendasan\.github\.io$/.test(location.hostname);
+
+// Which store THIS visitor can install from. Only the viewer build asks: a
+// share link is an App Links / Universal Links URL, so with the app installed
+// the OS opens the app and this page never loads. Reaching it at all means the
+// app is missing — the one moment where pointing at the right store matters.
+// The sharer's own platform is no guide here; half of shares cross platforms.
+function visitorStore() {
+  const ua = navigator.userAgent || '';
+  if (/android/i.test(ua)) return 'android';
+  if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
+  // iPadOS 13+ claims to be a Mac. No Mac has a touchscreen, so any touch
+  // point at all settles it (real iPads report 5; Macs, including Touch Bar
+  // ones, report 0).
+  if (/Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 0) return 'ios';
+  return '';   // desktop or unknown: leave both stores as they are
+}
+
+// Lead with whatever this visitor can act on right now: their own store, or —
+// while that store is still marked COMING SOON — the browser build, which
+// they can play immediately. The notice keeps its place so they learn the app
+// is on the way. The other store steps back but stays tappable; a desktop
+// visitor is often passing the link on.
+function leadWithVisitorStore() {
+  const want = visitorStore();
+  if (!want) return;
+  for (const id of ['storeLinks', 'runOfferStore']) {
+    const box = document.getElementById(id);
+    if (!box) continue;
+    const mine = box.querySelector(`[data-store="${want}"]`);
+    if (!mine) continue;
+    const lead = mine.hasAttribute('data-soon') ? box.querySelector('[data-browser]') : mine;
+    if (lead) {
+      box.insertBefore(lead, box.firstChild);
+      // keep the COMING SOON notice directly under the browser build, so the
+      // promise sits next to the thing they can play today
+      if (lead !== mine) box.insertBefore(mine, lead.nextSibling);
+    }
+    for (const el of box.querySelectorAll('[data-store]')) {
+      if (el !== mine) el.classList.add('storeAlt');
+    }
+  }
+}
 
 // One buzz helper for the three call sites: a light tick, a bump, or a crash.
 // Native gets graded haptics; the web keeps navigator.vibrate.
@@ -3794,6 +3843,7 @@ if (VIEWER) {
   // The offer carries the store links itself (LATER had nothing to return
   // to); tapping the backdrop still dismisses, mirroring what LATER did.
   document.getElementById('runOfferStore').classList.remove('hidden');
+  leadWithVisitorStore();   // both lists are up: point each at the right store
   ui.runOffer.addEventListener('pointerup', (e) => {
     if (e.target !== ui.runOffer) return;
     pendingRunOffer = null;
