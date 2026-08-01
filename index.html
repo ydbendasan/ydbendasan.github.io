@@ -44,18 +44,16 @@
     color: var(--neon); text-shadow: 0 0 10px rgba(39,232,255,.55);
   }
   #volLabel { flex: 1; text-align: center; font-size: 13px; letter-spacing: 1px; opacity: .9; }
-  #retryBtn {
-    pointer-events: auto; touch-action: manipulation;
-    background: transparent; border: 1px solid rgba(39,232,255,.5);
-    color: var(--neon); font-family: var(--mono); font-size: 12px;
-    letter-spacing: 2px; padding: 7px 13px; border-radius: 4px;
-  }
-  #retryBtn:active { background: rgba(39,232,255,.18); }
+  /* Round, bottom-left, thumb-reach: the one control that must stay tappable
+     mid-run without looking at it. Backdrop keeps it visible over the neon. */
   #menuBtn {
     pointer-events: auto; touch-action: manipulation;
-    background: transparent; border: 1px solid rgba(255,255,255,.35);
-    color: #fff; font-family: var(--mono); font-size: 13px;
-    padding: 7px 12px; border-radius: 4px; margin-left: 8px;
+    position: fixed;
+    left: calc(env(safe-area-inset-left, 0px) + 16px);
+    bottom: calc(var(--sab) + 16px);
+    width: 54px; height: 54px; border-radius: 50%;
+    background: rgba(10,16,30,.6); border: 1px solid rgba(255,255,255,.4);
+    color: #fff; font-family: var(--mono); font-size: 19px; line-height: 1;
   }
   #menuBtn:active { background: rgba(255,255,255,.12); }
 
@@ -82,7 +80,9 @@
   #menuBox > button:active { background: rgba(255,255,255,.12); }
   #menuQuit { border-color: rgba(255,61,110,.45) !important; color: #ff3d6e !important; }
   #menuResume { border-color: rgba(255,255,255,.55) !important; color: #fff !important; font-weight: 700; }
-  #menuSettings { display: flex; gap: 8px; }
+  /* 2x2 rather than one row: four labels at 9px in a 340px box would leave
+     ~70px each, too tight for "SOUND BLOCKED". */
+  #menuSettings { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   #menuSettings button {
     flex: 1; background: transparent; border: 1px solid rgba(255,255,255,.3);
     color: #cfe9ff; font-family: var(--mono); font-size: 9px; letter-spacing: 1px;
@@ -90,6 +90,8 @@
   }
   #themeBtn { border-color: rgba(255,61,240,.45) !important; color: var(--mag) !important; }
   #soundBtn.off { color: #6b7f99 !important; border-color: rgba(120,140,170,.4) !important; }
+  #warnBtn { border-color: rgba(255,61,110,.45) !important; color: #ff8fa6 !important; }
+  #warnBtn.off { color: #6b7f99 !important; border-color: rgba(120,140,170,.4) !important; }
   #modeBtn.off { color: var(--neon) !important; border-color: rgba(39,232,255,.5) !important; }
 
   /* ---------------- Flash messages ---------------- */
@@ -283,6 +285,10 @@
   #wreckCard.plain #wreckBox { border-color: rgba(39,232,255,.5); box-shadow: 0 0 24px rgba(39,232,255,.18); }
   #wreckText { font-size: 20px; font-weight: 700; letter-spacing: 1px; color: #fff; }
   #wreckHint { font-size: 10px; letter-spacing: 1.5px; line-height: 1.7; color: #cfe9ff; opacity: .6; }
+  #wreckTip {
+    font-size: 10px; letter-spacing: 1.5px; line-height: 1.7; color: var(--neon);
+    border-left: 2px solid rgba(39,232,255,.5); padding-left: 9px; opacity: .85;
+  }
   #wreckBtns { display: flex; gap: 9px; }
   #wreckBtns button {
     flex: 1; background: transparent; border: 1px solid rgba(255,255,255,.3);
@@ -307,9 +313,8 @@
     <div id="hudTop">
       <div id="levelLabel">DIST 0 m</div>
       <div id="volLabel">BEST 0 m</div>
-      <button id="retryBtn" type="button">RETRY</button>
-      <button id="menuBtn" type="button">&#9776;</button>
     </div>
+    <button id="menuBtn" type="button">&#9776;</button>
   </div>
 
   <!-- In-game menu: pauses the run; everything that used to crowd the HUD -->
@@ -320,6 +325,7 @@
         <button id="themeBtn" type="button">FX &middot; RHYTHM</button>
         <button id="soundBtn" type="button">SOUND ON</button>
         <button id="modeBtn" type="button">MODE &middot; NORMAL</button>
+        <button id="warnBtn" type="button">WARN &middot; ON</button>
       </div>
       <button id="menuQuit" type="button">EXIT TO TITLE</button>
       <button id="menuResume" type="button">RESUME</button>
@@ -388,6 +394,7 @@
       <div id="wreckTitle">WRECKED</div>
       <div id="wreckText">0 m</div>
       <div id="wreckHint"></div>
+      <div id="wreckTip" class="hidden"></div>
       <div id="wreckBtns">
         <button id="wreckAgain" type="button">GO AGAIN</button>
         <button id="wreckShare" type="button">SHARE CARD</button>
@@ -466,6 +473,31 @@ const CONFIG = {
     CAMERA_LEAD: 0.35,     // avatar rides at this fraction of screen width
     CAMERA_SMOOTH: 0.075,  // camera chase factor per tick
     KILL_MARGIN: 80,       // px behind the camera's left edge that kills
+    // --- off-screen hazard telegraph ---
+    // Lookahead is a pure function of aspect ratio: VIEW_W = SIM_H * (W/H),
+    // of which (1 - CAMERA_LEAD) sits ahead of the avatar. A portrait handset
+    // gets ~225 world px; pegs sit up to PEG_GAP_HARD + jitter (380) apart and
+    // the rope reaches ROPE_MAX (430), so from the middle sections on, what
+    // you must clear is regularly past the right edge. These knobs drive the
+    // hazard edge markers. Rendering only — course generation is
+    // viewport-independent (see genTo), so no layout or replay changes.
+    WARN_AHEAD: 520,       // px ahead of the AVATAR that earns an edge marker
+    WARN_INSET: 20,        // px in from the right edge the strip's far end sits
+    WARN_SPAN: 34,         // px the strip spends on depth — near edge to horizon
+    WARN_MAX: 3,           // most bars at once, so a hazard cluster can't wall up
+    WARN_COMFORT: 400,     // px of lookahead past which the view isn't the problem
+    // --- hazard map: the same information, given its own strip ---
+    // A squashed side-elevation of the corridor ahead, not a top-down map:
+    // depth runs along x, and a hazard's height in the strip mirrors its real
+    // height in the world, so "wall from the floor" and "block hanging at peg
+    // level" stay readable. Housed at the top because the bottom is where the
+    // kill floor lives (a second floor-line beside the real one invites a
+    // misread) and where the holding thumb sits.
+    MAP_AHEAD: 1100,       // world px of corridor the strip covers
+    MAP_H: 40,             // screen px tall — 26 squashed a 120px wall to 4px
+    MAP_SKY: 0.10,         // top fraction of SIM_H omitted (nothing spawns there)
+    MAP_PAD: 14,           // screen px inset from the left/right edges
+    MAP_TOP: 46,           // screen px below the safe-area top (clears the HUD)
     PX_PER_M: 50,          // distance scale for the score
     SECTION_BASE: 50,      // m — length of section 1
     SECTION_GROW: 30,      // m — each section is this much longer than the last
@@ -517,7 +549,7 @@ const ctx = canvas.getContext('2d', { alpha: false });
 
 const $ = (id) => document.getElementById(id);
 const ui = {
-  hud: $('hud'), level: $('levelLabel'), vol: $('volLabel'), retry: $('retryBtn'),
+  hud: $('hud'), level: $('levelLabel'), vol: $('volLabel'),
   flash: $('flash'),
   start: $('start'), startInfo: $('startInfo'), startPlay: $('startPlay'),
   startMode: $('startMode'), startCourse: $('startCourse'), startRuns: $('startRuns'),
@@ -526,8 +558,9 @@ const ui = {
   menuQuit: $('menuQuit'),
   runsModal: $('runsModal'), runsList: $('runsList'), runsClose: $('runsClose'),
   themeBtn: $('themeBtn'), soundBtn: $('soundBtn'), modeBtn: $('modeBtn'),
+  warnBtn: $('warnBtn'),
   wreckCard: $('wreckCard'), wreckTitle: $('wreckTitle'), wreckText: $('wreckText'),
-  wreckHint: $('wreckHint'), wreckAgain: $('wreckAgain'),
+  wreckHint: $('wreckHint'), wreckTip: $('wreckTip'), wreckAgain: $('wreckAgain'),
   wreckShare: $('wreckShare'), wreckVideo: $('wreckVideo'), wreckQuit: $('wreckQuit'),
   seedModal: $('seedModal'), seedInput: $('seedInput'),
   seedDaily: $('seedDaily'), seedRandom: $('seedRandom'),
@@ -662,6 +695,11 @@ for (const ev of ['fullscreenchange', 'webkitfullscreenchange']) {
 const engine = Engine.create();
 
 let W = 0, H = 0, DPR = 1;
+// The HUD is a DOM layer and handles the notch in CSS (--sat); the hazard map
+// is drawn on the canvas, which is full-bleed, so it needs the same inset as a
+// number. Cached on resize rather than read per frame (getComputedStyle forces
+// layout, and this runs inside the render loop).
+let safeTop = 0;
 // Uniform world->screen scale (H / SIM_H) and the world width it makes
 // visible (W / VS). All camera / culling / generation horizons use VIEW_W so
 // gameplay geometry is expressed in world units, never raw CSS pixels.
@@ -682,6 +720,10 @@ const state = { time: 0, particles: [] };
 /* ============================================================================
    Local persistence — localStorage only, zero server
    ============================================================================ */
+// Cycle order for the WARN button: the two ways of showing the same thing,
+// then off. Bars first because that is the default and the tested mode.
+const WARN_MODES = ['bars', 'map', 'off'];
+
 const store = {
   KEY: 'apexSwing.v1',
   LEGACY_KEY: 'arcade.v2',   // migrate the two-game save's swing half
@@ -689,8 +731,19 @@ const store = {
     // course: null = the shared daily; otherwise a custom seed phrase.
     // courseBest maps phrase -> best distance. Recordings live in IndexedDB
     // (see `runs`); courseReplay survives only long enough to migrate.
-    apex_swing: { bestDistance: 0, runs: 0, course: null, courseBest: {} },
-    settings: { sound: true, theme: 'rhythm', difficulty: 'normal' },   // theme: neon | rhythm | dream · difficulty: normal | serene
+    // orientHints counts the orientation tips already spent (see
+    // orientationTip); warnHinted records that the one-time "you can turn
+    // these off" pointer has been shown. Both are advice budgets, not progress.
+    apex_swing: {
+      bestDistance: 0, runs: 0, course: null, courseBest: {},
+      orientHints: 0, warnHinted: false,
+    },
+    // theme: neon | rhythm | dream · difficulty: normal | serene
+    // hazardWarn: how hazards ahead are telegraphed — 'bars' (edge markers on
+    // a depth strip), 'map' (a side-elevation of the corridor along the top),
+    // or 'off'. Defaults to 'bars' so the help is discoverable without opening
+    // settings, and so anyone already testing that mode keeps it.
+    settings: { sound: true, theme: 'rhythm', difficulty: 'normal', hazardWarn: 'bars' },
   },
   load() {
     try {
@@ -698,15 +751,28 @@ const store = {
       if (v1) {
         Object.assign(this.data.apex_swing, v1.apex_swing || {});
         Object.assign(this.data.settings, v1.settings || {});
+        if (this.migrate()) this.save();
         return;
       }
       const old = JSON.parse(localStorage.getItem(this.LEGACY_KEY));
       if (old) {
         Object.assign(this.data.apex_swing, old.apex_swing || {});
         Object.assign(this.data.settings, old.settings || {});
+        this.migrate();
         this.save();
       }
     } catch (e) { /* private mode / blocked storage: play without persistence */ }
+  },
+  // hazardWarn shipped as a boolean before the map mode existed. Coerce rather
+  // than reset, so anyone already testing the bars keeps them. Reports whether
+  // anything was rewritten, so load() can persist the coerced value instead of
+  // carrying the legacy shape forward on every boot.
+  migrate() {
+    const s = this.data.settings;
+    const before = s.hazardWarn;
+    if (typeof s.hazardWarn === 'boolean') s.hazardWarn = s.hazardWarn ? 'bars' : 'off';
+    if (!WARN_MODES.includes(s.hazardWarn)) s.hazardWarn = 'bars';
+    return s.hazardWarn !== before;
   },
   save() {
     try { localStorage.setItem(this.KEY, JSON.stringify(this.data)); }
@@ -1395,6 +1461,7 @@ const swing = {
   wasBeyond: false, fireworkT: 0,
   section: 1, nextGateM: 0,
   acted: false,        // any input this run?
+  sawWarn: false,      // has a hazard edge marker actually been drawn to them?
   idleDeaths: 0,       // consecutive runs that died with zero input
   awaitTap: false,     // parked on the "still there?" prompt
   tick: 0,             // fixed-step counter — the replay clock
@@ -1484,7 +1551,7 @@ function resetRun() {
   swing.wasBeyond = false; swing.fireworkT = 0;
   swing.section = 1; swing.nextGateM = sectionEndM(1);
   swing.lastPegY = S.SIM_H * 0.32;
-  swing.acted = false; swing.awaitTap = false;
+  swing.acted = false; swing.awaitTap = false; swing.sawWarn = false;
   swing.tick = 0;
   swing.traj = { samples: [], events: [] };   // what actually happened
   swing.playback = null; swing.replaySource = null;
@@ -2064,6 +2131,67 @@ function swingRender() {
     }
   }
 
+  // Off-screen hazard telegraph: a bar spanning the vertical extent of a
+  // hazard still past the right edge, so where the mark sits IS the decision —
+  // rising from the floor means a wall to swing over, floating means a block
+  // to thread under. Only hazards earn a marker: the rope auto-picks its peg
+  // (see candidatePeg), so warning about a peg the player never chooses is
+  // noise on the one axis that is already scarce.
+  //
+  // The horizon is measured from the AVATAR, not from the screen edge, so a
+  // wide enough view — landscape, tablet — has everything in rope range
+  // already visible and draws nothing at all. Self-disabling by construction.
+  // Serene hazards don't kill, so they earn no warning either.
+  // The strip carries a depth axis, not one shared column. Stacking every
+  // pending hazard on the same x merged two staggered walls into a single tall
+  // bar that read as one solid obstacle — the opposite of preparation. Each bar
+  // now sits at an x proportional to how far ahead it actually is, so the
+  // running order reads left-to-right (nearest innermost, matching the world's
+  // own "further away is further right") and the gap between bars is
+  // proportional to the real gap between hazards. The nearest carries full
+  // weight because it is the one to solve now; the rest recede.
+  // Live play only. The telegraph is one player's assist setting, so painting
+  // it over a replay would stamp the viewer's preference onto someone else's
+  // run — and the video paths hide the DOM chrome (ui.hud) but cannot hide
+  // anything drawn on the canvas, so a shared clip would bake the bars in. The
+  // viewer build has no pause menu (menuBtn is hidden), so a spectator could
+  // not even switch it off.
+  if (swing.avatar && !swing.dead && !swing.playback && !videoRec.active &&
+      !sereneHaz && store.data.settings.hazardWarn === 'bars') {
+    const edge = swing.camX + VIEW_W;
+    const horizon = swing.avatar.position.x + S.WARN_AHEAD;
+    const x0 = edge - S.WARN_INSET - S.WARN_SPAN;   // strip's near end
+    const depth = Math.max(1, horizon - edge);
+    let n = 0;
+    for (const h of swing.hazards) {
+      if (h.x <= edge || h.x >= horizon) continue;
+      if (++n > S.WARN_MAX) break;
+      const near = n === 1;
+      const bx = x0 + clamp((h.x - edge) / depth, 0, 1) * S.WARN_SPAN;
+      // ease in as it crosses the horizon, so nothing pops
+      const a = clamp((horizon - h.x) / (S.WARN_AHEAD * 0.35), 0, 1);
+      ctx.strokeStyle = rgba(COLORS.BAD, (near ? 0.85 : 0.4) * a);
+      ctx.lineWidth = near ? 3 : 2;
+      ctx.beginPath();
+      ctx.moveTo(bx, h.y);
+      ctx.lineTo(bx, h.y + h.h);
+      ctx.stroke();
+      // a foot tick on the spike floor gives the bars a shared baseline, so
+      // their spacing reads as distance rather than as arbitrary placement
+      ctx.strokeStyle = rgba(COLORS.BAD, (near ? 0.5 : 0.22) * a);
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(bx - 3, S.SIM_H - S.SPIKE_H);
+      ctx.lineTo(bx + 3, S.SIM_H - S.SPIKE_H);
+      ctx.stroke();
+      // The settings hint is only worth showing to someone who has actually
+      // seen a marker. A bar right on the horizon strokes at alpha 0, so
+      // require a visible one — otherwise the hint can fire for a marker that
+      // was never on screen.
+      if (a > 0.08) swing.sawWarn = true;
+    }
+  }
+
   // lasso + stick figure (the physics body is the invisible hitbox)
   if (swing.avatar) {
     const pose = stickPose();
@@ -2073,6 +2201,92 @@ function swingRender() {
 
   drawParticles();   // swing particles live in world coordinates
   ctx.restore();
+
+  // the map is a HUD layer, so it draws in screen space after the world
+  if (!sereneHaz && !swing.playback && !videoRec.active &&
+      store.data.settings.hazardWarn === 'map') drawHazardMap();
+}
+
+/* ---- hazard map: a squashed side-elevation of the corridor ahead ----
+   The edge bars answer "what is next" inside 34 px of play width; this answers
+   the same question with the whole width and none of the play area, at the
+   cost of a glance away from the avatar. Both encode a hazard's real vertical
+   position, so a low mark still means a floor wall to swing over and a high
+   one a block to thread under — only the horizontal scale changes, from ~8:1
+   compression to roughly 1:3 expansion. Screen space, drawn after ctx.restore.
+*/
+function drawHazardMap() {
+  const S = CONFIG.SWING;
+  const a = swing.avatar;
+  if (!a) return;
+  // Self-disable on a wide view, matching the bars exactly. A bar needs a
+  // hazard between the screen edge (avatar + lookahead) and the horizon
+  // (avatar + WARN_AHEAD), so the bars go quiet precisely when lookahead
+  // reaches WARN_AHEAD. Using WARN_COMFORT here instead left a band — roughly
+  // square viewports, a split-view iPad — where the bars still marked hazards
+  // but the map had already given up on the same course.
+  if (VIEW_W * (1 - S.CAMERA_LEAD) >= S.WARN_AHEAD) return;
+  const x0 = S.MAP_PAD, x1 = W - S.MAP_PAD;
+  if (x1 <= x0) return;
+  const top = safeTop + S.MAP_TOP, h = S.MAP_H;
+  const ax = a.position.x;
+  const sx = (wx) => x0 + clamp((wx - ax) / S.MAP_AHEAD, 0, 1) * (x1 - x0);
+  // the top MAP_SKY of the world never holds a peg or a hazard, so spending
+  // strip height on it would only squash the part that matters
+  const skyY = S.SIM_H * S.MAP_SKY;
+  const sy = (wy) => top + clamp((wy - skyY) / (S.SIM_H - skyY), 0, 1) * h;
+
+  // the stretch already on screen, so map and world read as one thing
+  const seen = sx(swing.camX + VIEW_W);
+  ctx.fillStyle = 'rgba(120,160,220,0.07)';
+  ctx.fillRect(x0, top, seen - x0, h);
+
+  // frame: a kill-floor line along the bottom is what makes a low mark read as
+  // "rising from the floor" rather than "floating low"
+  ctx.strokeStyle = rgba(COLORS.BAD, 0.35);
+  ctx.lineWidth = 1;
+  // at sy(kill floor), not the strip's bottom edge — SPIKE_H is inside SIM_H,
+  // so those differ by ~2px and floor-standing walls would stop short of the
+  // very line that is supposed to make them read as standing on it
+  const floorY = sy(S.SIM_H - S.SPIKE_H);
+  ctx.beginPath();
+  ctx.moveTo(x0, floorY + 0.5);
+  ctx.lineTo(x1, floorY + 0.5);
+  ctx.stroke();
+
+  // the next section gate — the hazard-free breather is worth planning toward
+  for (let n = swing.section; ; n++) {
+    const gx = gateX(n);
+    if (gx <= ax) continue;
+    if (gx > ax + S.MAP_AHEAD) break;
+    ctx.strokeStyle = rgba(COLORS.GOOD, 0.5);
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 3]);
+    ctx.beginPath();
+    ctx.moveTo(sx(gx), top);
+    ctx.lineTo(sx(gx), top + h);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    break;
+  }
+
+  // hazards, at true relative height; the nearest carries full weight
+  let first = true;
+  for (const hz of swing.hazards) {
+    if (hz.x + hz.w <= ax || hz.x >= ax + S.MAP_AHEAD) continue;
+    const bx = sx(hz.x), bw = Math.max(1.5, sx(hz.x + hz.w) - bx);
+    const by = sy(hz.y), bh = Math.max(1.5, sy(hz.y + hz.h) - by);
+    ctx.fillStyle = rgba(COLORS.BAD, first ? 0.85 : 0.45);
+    ctx.fillRect(bx, by, bw, bh);
+    first = false;
+    swing.sawWarn = true;
+  }
+
+  // "you are here": the avatar's own height on the same scale
+  ctx.fillStyle = rgba(S.AVATAR_COLOR, 0.95);
+  ctx.beginPath();
+  ctx.arc(x0, sy(a.position.y), 2.5, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 /* ---- stick figure: pose derived from physics state, no extra bodies ---- */
@@ -2564,6 +2778,44 @@ function showReplayOffer() {
 // The end-of-run beat: distance + context, with GO AGAIN / SHARE CARD /
 // SHARE VIDEO. New bests get the celebratory green trim; other meaningful
 // runs the plain cyan one.
+// Orientation as a difficulty lever. Lookahead is decided by aspect ratio
+// alone (VIEW_W = SIM_H * W/H), so landscape sees roughly 4x further ahead
+// than portrait — a real, mechanical difference, not a preference. Offer the
+// wide view to players stalling in the early sections, and offer the tight
+// one back to anyone clearing sections in landscape who wants more bite.
+// Capped lifetime, because a tip that repeats forever reads as nagging.
+const ORIENT_HINT_MAX = 3;
+
+// The wreck card carries one line of advice at most, and the first thing worth
+// saying is that the hazard markers are optional. Gated on sawWarn rather than
+// on distance: a player wrecked at 20 m has never seen a marker, and pointing
+// at a switch for something they haven't noticed just adds a setting to worry
+// about. Said once, ever — after that the orientation tip owns the slot.
+function warnTip() {
+  const as = store.data.apex_swing;
+  const mode = store.data.settings.hazardWarn;
+  if (as.warnHinted || !swing.sawWarn || mode === 'off') return '';
+  as.warnHinted = true;
+  store.save();
+  return mode === 'map'
+    ? 'TIP · THE TOP STRIP MAPS HAZARDS AHEAD. SWITCH OR HIDE IT IN THE MENU.'
+    : 'TIP · THE RED EDGE BARS WARN OF HAZARDS AHEAD. SWITCH OR HIDE THEM IN THE MENU.';
+}
+
+function orientationTip(info) {
+  const as = store.data.apex_swing;
+  if ((as.orientHints || 0) >= ORIENT_HINT_MAX) return '';
+  const ahead = VIEW_W * (1 - CONFIG.SWING.CAMERA_LEAD);
+  let tip = '';
+  if (ahead < CONFIG.SWING.WARN_COMFORT && !info.newBest && info.section <= 2) {
+    tip = 'TIP · TURN THE PHONE SIDEWAYS — LANDSCAPE SEES FAR FURTHER AHEAD.';
+  } else if (ahead >= CONFIG.SWING.WARN_COMFORT && info.section >= 4) {
+    tip = 'TIP · WANT MORE BITE? PORTRAIT GIVES YOU MUCH LESS WARNING.';
+  }
+  if (tip) { as.orientHints = (as.orientHints || 0) + 1; store.save(); }
+  return tip;
+}
+
 function showWreckCard(info) {
   swing.awaitTap = true;   // park behind the dialog
   ui.flash.classList.remove('show');
@@ -2574,6 +2826,9 @@ function showWreckCard(info) {
   ui.wreckHint.textContent = info.newBest
     ? 'SHARE THIS RUN SO A FRIEND CAN WATCH IT AND CHASE YOUR DISTANCE.'
     : `${info.section > 1 ? `${info.section - 1} SECTION${info.section > 2 ? 'S' : ''} CLEARED · ` : ''}BEST ${info.best} m`;
+  const tip = warnTip() || orientationTip(info);
+  ui.wreckTip.textContent = tip;
+  ui.wreckTip.classList.toggle('hidden', !tip);
   ui.wreckCard.classList.remove('hidden');
 }
 
@@ -2609,6 +2864,7 @@ const videoRec = {
   nativeStop: null,   // armed by the ReplayKit POC path; ends the OS recording
   nativeOverlay: null, // { phase, t, rep } — cinematic drawn ON the live canvas
                        // (ReplayKit records the screen, so branding must be on it)
+  permHold: false,     // OS recording-permission prompt up: simPaused() freezes
 };
 
 const VIDEO_TUNE = {
@@ -3185,11 +3441,15 @@ function startVideoShareNative(rep) {
   const T = VIDEO_TUNE;
   let step = 'START', lastUri = null;
   const cleanup = () => {
-    videoRec.active = false; videoRec.timeScale = 1;
+    videoRec.active = false; videoRec.timeScale = 1; videoRec.permHold = false;
     videoRec.nativeStop = null; videoRec.nativeOverlay = null;
     if (native.StatusBar) { try { native.StatusBar.show(); } catch (e) {} }
   };
+  // start() can sit under the OS permission alert (first recording of the
+  // session): the modals above are gone, so hold the sim until it settles
+  videoRec.permHold = true;
   native.ReplayKit.start().then(() => {
+    videoRec.permHold = false;
     // status bar out of frame; videoRec.active hides the HUD via enterSwing
     if (native.StatusBar) { try { native.StatusBar.hide(); } catch (e) {} }
     videoRec.active = true;
@@ -3373,11 +3633,15 @@ function anyModalOpen() {
     || !ui.runsModal.classList.contains('hidden');
 }
 
-// The menu and runs browser pause the run outright (a swing mid-arc
-// shouldn't die behind a dialog); the other modals park the sim themselves.
+// An overlay that owns the input also owns time: every modal freezes the sim
+// outright (a swing mid-arc shouldn't die behind a dialog, and a wreck
+// shouldn't keep tumbling behind its card). permHold covers the native
+// recording-permission prompt, which has no DOM element to test. Recording
+// itself is exempt: the replay→video time-warp drives time through
+// videoRec.timeScale, and every path into it hides the modals first.
 function simPaused() {
-  return !ui.menuModal.classList.contains('hidden')
-    || !ui.runsModal.classList.contains('hidden');
+  if (videoRec.active) return false;
+  return anyModalOpen() || videoRec.permHold;
 }
 
 window.addEventListener('keydown', (e) => {
@@ -3409,15 +3673,6 @@ ui.startPlay.addEventListener('pointerup', (e) => {
   e.stopPropagation();
   audio.unlock(); sfx.tick();
   enterSwing();
-});
-
-ui.retry.addEventListener('pointerup', (e) => {
-  e.stopPropagation();
-  if (videoRec.active) return;   // HUD is hidden while recording; belt-and-braces
-  sfx.tick();
-  swing.playback = null; swing.awaitTap = false;
-  ui.flash.classList.remove('show');
-  resetRun();
 });
 
 function openSeedModal() {
@@ -3548,6 +3803,27 @@ ui.soundBtn.addEventListener('pointerup', (e) => {
   updateSoundBtn();
   if (store.data.settings.sound) { audio.unlock(); sfx.tick(); }
   else audio.silenceLoops();
+});
+
+/* ---- hazard warnings: edge BARS, top MAP, or OFF ---- */
+const WARN_FLASH = {
+  bars: ['HAZARD BARS · AT THE EDGE', COLORS.BAD],
+  map:  ['HAZARD MAP · ALONG THE TOP', COLORS.BAD],
+  off:  ['HAZARD WARNINGS OFF', COLORS.BIN],
+};
+function updateWarnBtn() {
+  const mode = store.data.settings.hazardWarn;
+  ui.warnBtn.textContent = 'WARN · ' + mode.toUpperCase();
+  ui.warnBtn.classList.toggle('off', mode === 'off');
+}
+ui.warnBtn.addEventListener('pointerup', (e) => {
+  e.stopPropagation();
+  const s = store.data.settings;
+  s.hazardWarn = WARN_MODES[(WARN_MODES.indexOf(s.hazardWarn) + 1) % WARN_MODES.length];
+  store.save();
+  updateWarnBtn();
+  sfx.tick();
+  flash(...WARN_FLASH[s.hazardWarn]);
 });
 
 function updateThemeBtn() { ui.themeBtn.textContent = 'FX · ' + store.data.settings.theme.toUpperCase(); }
@@ -3745,6 +4021,8 @@ function resize() {
     VS = vsTarget; vsTo = vsTarget; vsT = 1;
   }
   VIEW_W = W / VS;
+  safeTop = parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue('--sat')) || 0;
   buildGrid();
   // Runs and replays continue across any resize: the world is fully
   // device-independent, so rotating the phone (or the URL bar collapsing)
@@ -3797,7 +4075,7 @@ function frame(now) {
     VIEW_Y *= Math.pow(0.85, dtMs / 16.7); // settle back to the full band
     if (Math.abs(VIEW_Y) < 0.5) VIEW_Y = 0;
   }
-  if (simPaused()) acc = 0;   // menu open: hold time still, no catch-up burst
+  if (simPaused()) acc = 0;   // overlay open: hold time still, no catch-up burst
   else acc += dtMs;
   let steps = 0;
   while (acc >= STEP && steps++ < 4) {
@@ -3824,6 +4102,7 @@ if (!THEMES.includes(store.data.settings.theme)) { store.data.settings.theme = '
 refreshDailyCourse();
 updateSoundBtn();
 updateThemeBtn();
+updateWarnBtn();
 updateModeBtns();
 updateStart();
 resize();
@@ -3832,7 +4111,7 @@ resize();
 if (VIEWER) {
   for (const el of [ui.startPlay, ui.startMode, ui.startCourse, ui.startRuns,
                     ui.startShare, ui.runOfferPlay, ui.runOfferLater,
-                    ui.menuBtn, ui.retry]) {
+                    ui.menuBtn]) {
     el.classList.add('hidden');
   }
   document.getElementById('startTag').textContent =
@@ -3929,7 +4208,7 @@ window.__arcade = {
   renderShareCard, shareScore, decodeReplay, playReplay,
   encodeTrajectory, decodeTrajectory, shareRunText, courseLink, runs,
   recordReplayVideo, videoRec,
-  extractReplay, showRunOffer, genTo, sectionAtM, native, sfx, THEMES, fs,
+  extractReplay, showRunOffer, showWreckCard, genTo, sectionAtM, native, sfx, THEMES, fs,
   view: () => ({ VS, VIEW_W, vsT }),
   mode: () => started ? 'swing' : 'start',
 };
