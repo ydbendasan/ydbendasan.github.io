@@ -194,13 +194,13 @@
   #seedApply { border-color: var(--mag) !important; color: var(--mag) !important; font-weight: 700; }
 
   /* ---------------- Start-screen mode/course toggles ---------------- */
-  #startMode, #startCourse, #startRuns, #startShare {
+  #startMode, #startCourse, #startRuns, #startShare, #startSettings {
     margin-top: 4px; font-family: var(--mono); font-size: 11px; letter-spacing: 2px;
     color: var(--good); background: transparent; border: 1px solid rgba(182,255,46,.45);
     padding: 8px 16px; border-radius: 6px; touch-action: manipulation;
   }
-  #startCourse, #startRuns { color: var(--neon); border-color: rgba(39,232,255,.45); }
-  #startCourse:active, #startRuns:active { background: rgba(39,232,255,.15); }
+  #startCourse, #startRuns, #startSettings { color: var(--neon); border-color: rgba(39,232,255,.45); }
+  #startCourse:active, #startRuns:active, #startSettings:active { background: rgba(39,232,255,.15); }
   #startShare:active { background: rgba(182,255,46,.15); }
 
   /* ---------------- Best-runs browser ---------------- */
@@ -343,6 +343,7 @@
     <button id="startCourse" type="button">COURSE</button>
     <button id="startRuns" type="button">BEST RUNS</button>
     <button id="startShare" type="button">SHARE CARD</button>
+    <button id="startSettings" type="button">SETTINGS</button>
     <button id="startMode" type="button">MODE &middot; NORMAL</button>
     <div id="storeLinks" class="hidden">
       <a id="appStoreLink" class="playLink" data-store="ios" href="https://apps.apple.com/app/id6793646569" target="_blank" rel="noopener">GET THE APP &middot; APP STORE</a>
@@ -553,9 +554,9 @@ const ui = {
   flash: $('flash'),
   start: $('start'), startInfo: $('startInfo'), startPlay: $('startPlay'),
   startMode: $('startMode'), startCourse: $('startCourse'), startRuns: $('startRuns'),
-  startShare: $('startShare'),
+  startShare: $('startShare'), startSettings: $('startSettings'),
   menuBtn: $('menuBtn'), menuModal: $('menuModal'), menuResume: $('menuResume'),
-  menuQuit: $('menuQuit'),
+  menuQuit: $('menuQuit'), menuTitle: $('menuTitle'),
   runsModal: $('runsModal'), runsList: $('runsList'), runsClose: $('runsClose'),
   themeBtn: $('themeBtn'), soundBtn: $('soundBtn'), modeBtn: $('modeBtn'),
   warnBtn: $('warnBtn'),
@@ -3897,13 +3898,31 @@ ui.wreckQuit.addEventListener('pointerup', (e) => {
   returnToStart();
 });
 
-/* ---- in-game menu ---- */
+/* ---- in-game menu / title-screen settings ---- */
 function closeMenu() { ui.menuModal.classList.add('hidden'); }
+
+// One panel, two doors: mid-run it is the pause menu, and from the title
+// screen the same four toggles are just settings. Sound and theme are exactly
+// what a player wants to set BEFORE starting, which the pause-only route made
+// impossible without first starting a run to interrupt.
+function openMenu() {
+  const paused = started;
+  ui.menuTitle.textContent = paused ? 'PAUSED' : 'SETTINGS';
+  ui.menuResume.textContent = paused ? 'RESUME' : 'DONE';
+  ui.menuQuit.classList.toggle('hidden', !paused);   // nothing to exit to
+  ui.menuModal.classList.remove('hidden');           // simPaused() freezes a run
+}
 ui.menuBtn.addEventListener('pointerup', (e) => {
   e.stopPropagation();
   if (videoRec.active) return;
   sfx.tick();
-  ui.menuModal.classList.remove('hidden');   // simPaused() freezes the run
+  openMenu();
+});
+ui.startSettings.addEventListener('pointerup', (e) => {
+  e.stopPropagation();
+  audio.unlock();   // the sound toggle should take effect on this very tap
+  sfx.tick();
+  openMenu();
 });
 ui.menuResume.addEventListener('pointerup', (e) => { e.stopPropagation(); sfx.tick(); closeMenu(); });
 ui.menuModal.addEventListener('pointerup', (e) => {
@@ -4189,10 +4208,18 @@ if (native.on && native.App) {
       returnToStart();
       return;
     }
-    if (shown(ui.menuModal)) { closeMenu(); returnToStart(); return; }       // = QUIT
+    // Mid-run the panel is the pause menu and back means QUIT; opened from the
+    // title screen it is only settings, so back just shuts it — there is
+    // nothing to quit to, and returning to the title would be a no-op that
+    // discarded the toggles' context.
+    if (shown(ui.menuModal)) {
+      closeMenu();
+      if (started) returnToStart();                      // = QUIT
+      return;
+    }
     if (started) {
       if (swing.playback) { returnToStart(); return; }   // watching a replay: straight out
-      ui.menuModal.classList.remove('hidden');           // simPaused() freezes the run
+      openMenu();                                        // simPaused() freezes the run
       return;
     }
     try { native.App.exitApp(); } catch (e) {}    // title screen: leave the app
