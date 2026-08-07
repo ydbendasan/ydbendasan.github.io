@@ -949,9 +949,23 @@ const audio = {
   ready() { return !!this.ctx && this.enabled; },
 
   // Must be called from a user gesture (mobile autoplay policy). Safe to call
-  // on every tap — it retries until the context is actually running.
+  // on every tap — it retries until the context is actually running. With
+  // sound off it does nothing at all: merely opening an audio session is
+  // enough to interrupt whatever the player is listening to.
   unlock() {
+    if (!this.enabled) return;
     try {
+      // iOS/WKWebView derives an AVAudioSession category from what the page
+      // plays. WebAudio on its own lands on Ambient — mixes with Apple Music,
+      // Spotify or a podcast, and is silenced by the ringer switch — but any
+      // audible media element promotes the session to Playback, which ignores
+      // the ringer switch and *interrupts* every other app on the device.
+      // Claim Ambient outright (Safari/WKWebView 16.4+; elsewhere the absence
+      // of a media element gets us there anyway): a one-button game's bleeps
+      // are not worth killing someone's music over.
+      if (navigator.audioSession && navigator.audioSession.type !== 'ambient') {
+        navigator.audioSession.type = 'ambient';
+      }
       if (!this.ctx) {
         const AC = window.AudioContext || window.webkitAudioContext;
         if (!AC) return;
@@ -996,17 +1010,6 @@ const audio = {
         for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
       }
       if (this.ctx.state !== 'running') this.ctx.resume().catch(() => {});
-      // iOS: the ringer/silent switch mutes WebAudio in Safari, but not
-      // HTMLMediaElement playback. Playing a silent media element inside the
-      // gesture promotes the audio session, so the synth stays audible even
-      // with the phone on silent.
-      if (!this.mediaKick) {
-        const el = document.createElement('audio');
-        el.setAttribute('playsinline', '');
-        el.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-        this.mediaKick = el;
-      }
-      this.mediaKick.play().catch(() => {});
       // some browsers only fully start the graph once a source has played
       if (this.ctx.state === 'running' && !this.primed) {
         this.primed = true;
@@ -3583,6 +3586,38 @@ function applyCourse(phrase) {
 /* ============================================================================
    Input — pointer events cover touch, pen and mouse; space on desktop
    ============================================================================ */
+
+// #hud sets pointer-events: none so taps fall through to the canvas, but that
+// does NOT hide its text from WebKit's selection hit-test: hold a finger over
+// the top of the screen and iOS selects the HUD label and raises the copy
+// bubble mid-run. Cancelling the touch default over the canvas suppresses the
+// gesture; pointer events, which is all the input below listens to, fire
+// regardless. Only the canvas — the start screen and modals sit above it in
+// their own layers and never see this listener, so their taps, links and the
+// scrollable runs list behave normally.
+canvas.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+
+// The gesture reaches those upper layers too, and the double-tap-and-hold
+// variant slips past the line above even on the canvas. Nothing here is
+// selectable by design except the seed field, so a selection anywhere else is
+// that gesture: drop it before the callout can attach. The field itself is
+// left alone — WebKit reports its caret through this same event, and it holds
+// focus for the whole life of the seed modal, so "is something focused" is not
+// enough to tell the two apart; the range has to actually sit in the field.
+document.addEventListener('selectionchange', () => {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) return;
+  const el = document.activeElement;
+  if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+    // WebKit shadow-adjusts the anchor for form controls: it may name the
+    // field, an ancestor of it, or a detached node. Any of those is the
+    // field's own selection; only a range demonstrably elsewhere is cleared.
+    const n = sel.anchorNode;
+    if (!n || !document.contains(n) || el.contains(n) || n.contains(el)) return;
+  }
+  sel.removeAllRanges();
+});
+
 canvas.addEventListener('pointerdown', (e) => {
   audio.unlock();
   if (videoRec.nativeStop) { videoRec.nativeStop(); return; }   // stop early
