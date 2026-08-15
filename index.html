@@ -80,9 +80,11 @@
   #menuBox > button:active { background: rgba(255,255,255,.12); }
   #menuQuit { border-color: rgba(255,61,110,.45) !important; color: #ff3d6e !important; }
   #menuResume { border-color: rgba(255,255,255,.55) !important; color: #fff !important; font-weight: 700; }
-  /* 2x2 rather than one row: four labels at 9px in a 340px box would leave
-     ~70px each, too tight for "SOUND BLOCKED". */
+  /* Two per row rather than one: four labels at 9px in a 340px box would leave
+     ~70px each, too tight for "SOUND BLOCKED". The odd fifth (GRAB) spans the
+     row instead of leaving a hole, and earns the room for its longer label. */
   #menuSettings { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #grabBtn { grid-column: 1 / -1; }
   #menuSettings button {
     flex: 1; background: transparent; border: 1px solid rgba(255,255,255,.3);
     color: #cfe9ff; font-family: var(--mono); font-size: 9px; letter-spacing: 1px;
@@ -93,6 +95,9 @@
   #warnBtn { border-color: rgba(255,61,110,.45) !important; color: #ff8fa6 !important; }
   #warnBtn.off { color: #6b7f99 !important; border-color: rgba(120,140,170,.4) !important; }
   #modeBtn.off { color: var(--neon) !important; border-color: rgba(39,232,255,.5) !important; }
+  /* GRAB lights up in the avatar's own amber while loose grabbing is on, so a
+     non-default swing physics is visible at a glance in the settings panel. */
+  #grabBtn.loose { color: #ffb42e !important; border-color: rgba(255,180,46,.55) !important; }
 
   /* ---------------- Flash messages ---------------- */
   #flash {
@@ -227,6 +232,8 @@
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-size: 11px; letter-spacing: 1px; color: #cfe9ff;
   }
+  /* the loop-grab mark on a saved run, in the avatar's amber like the setting */
+  #runsList .runGrab { color: #ffb42e; font-weight: 700; }
   #runsList .runDist { font-size: 11px; letter-spacing: 1px; color: var(--good); font-weight: 700; }
   #runsList .runRow button {
     background: transparent; border: 1px solid rgba(255,255,255,.3);
@@ -325,6 +332,7 @@
         <button id="soundBtn" type="button">SOUND ON</button>
         <button id="modeBtn" type="button">MODE &middot; NORMAL</button>
         <button id="warnBtn" type="button">WARN &middot; ON</button>
+        <button id="grabBtn" type="button">GRAB &middot; ABOVE ONLY</button>
       </div>
       <button id="menuQuit" type="button">EXIT TO TITLE</button>
       <button id="menuResume" type="button">RESUME</button>
@@ -449,7 +457,7 @@ const CONFIG = {
     AVATAR_COLOR: '#ffb42e',
     ROPE_MAX: 430,         // px — farthest peg a touch can hook
     AHEAD_BIAS: 60,        // pegs more than this behind the avatar are ignored
-    PEG_ABOVE_MIN: 24,     // px — pegs must be at least this far ABOVE to hook
+    PEG_ABOVE_MIN: 24,     // px — pegs must be this far ABOVE to hook (grab: 'above')
     ROPE_STIFFNESS: 0.9,
     ROPE_SHORTEN: 0.95,    // rope grabs slightly short of current distance (adds zing)
     PUMP_FORCE: 0.00045,   // tangential thrust while holding (~0.43x gravity)
@@ -556,7 +564,7 @@ const ui = {
   menuQuit: $('menuQuit'), menuTitle: $('menuTitle'),
   runsModal: $('runsModal'), runsList: $('runsList'), runsClose: $('runsClose'),
   themeBtn: $('themeBtn'), soundBtn: $('soundBtn'), modeBtn: $('modeBtn'),
-  warnBtn: $('warnBtn'),
+  warnBtn: $('warnBtn'), grabBtn: $('grabBtn'),
   wreckCard: $('wreckCard'), wreckTitle: $('wreckTitle'), wreckText: $('wreckText'),
   wreckHint: $('wreckHint'), wreckTip: $('wreckTip'), wreckAgain: $('wreckAgain'),
   wreckShare: $('wreckShare'), wreckVideo: $('wreckVideo'), wreckQuit: $('wreckQuit'),
@@ -714,13 +722,39 @@ const state = { time: 0, particles: [] };
 // then off. Bars first because that is the default and the tested mode.
 const WARN_MODES = ['bars', 'map', 'off'];
 
+// Cycle order for the GRAB button. 'above' is the playground swing: you may
+// only hook a peg overhead, and nothing carries you past the anchor. 'any'
+// hooks the nearest peg in any direction and keeps the line taut over the
+// top, so a fast entry loops right round the peg. 'above' stays first: it is
+// the default, and the one every existing save has been played on.
+const GRAB_MODES = ['above', 'any'];
+
+// Bests are scoped to the grab mode. ANY PEG can hook a peg you have already
+// fallen past and keeps the energy ABOVE ONLY bleeds off at the top, so the
+// same course is not the same contest in the two — one shared number would be
+// a comparison of nothing. This tag is what separates them, in courseBest and
+// in the recordings map alike (they must agree: the saved run for a course is
+// the run that set its best). 'above' keeps the bare phrase, so every best and
+// recording from before this setting existed stays exactly where it was.
+const GRAB_TAG = { above: '', any: ' ⟳' };
+
+// The grab in force: the one a live run latched at its start (see resetRun),
+// otherwise whatever the setting says. Everything that decides physics, or
+// which best is on show, asks this — never the setting directly.
+function activeGrab() { return swing.grab || store.data.settings.grab; }
+
+function bestKey(course, grab) {
+  return course + (GRAB_TAG[grab || activeGrab()] || '');
+}
+
 const store = {
   KEY: 'apexSwing.v1',
   LEGACY_KEY: 'arcade.v2',   // migrate the two-game save's swing half
   data: {
     // course: null = the shared daily; otherwise a custom seed phrase.
-    // courseBest maps phrase -> best distance. Recordings live in IndexedDB
-    // (see `runs`); courseReplay survives only long enough to migrate.
+    // courseBest maps phrase (+ grab tag — see bestKey) -> best distance.
+    // Recordings live in IndexedDB under the same keys (see `runs`);
+    // courseReplay survives only long enough to migrate.
     // orientHints counts the orientation tips already spent (see
     // orientationTip); warnHinted records that the one-time "you can turn
     // these off" pointer has been shown. Both are advice budgets, not progress.
@@ -733,7 +767,12 @@ const store = {
     // a depth strip), 'map' (a side-elevation of the corridor along the top),
     // or 'off'. Defaults to 'bars' so the help is discoverable without opening
     // settings, and so anyone already testing that mode keeps it.
-    settings: { sound: true, theme: 'rhythm', difficulty: 'normal', hazardWarn: 'bars' },
+    // grab: which pegs a touch can hook and whether the swing may loop over
+    // them — 'above' (default, the playground swing) or 'any'. See GRAB_MODES.
+    settings: {
+      sound: true, theme: 'rhythm', difficulty: 'normal',
+      hazardWarn: 'bars', grab: 'above',
+    },
   },
   load() {
     try {
@@ -1467,6 +1506,7 @@ const swing = {
   spawnedTo: 0, dead: false, deadTimer: 0,
   rng: Math.random,   // seeded per course in resetRun
   courseName: '',
+  grab: null,         // grab mode LATCHED at run start (see activeGrab)
 };
 
 // Word/phrase -> 32-bit seed. Same phrase = same course on every device,
@@ -1532,6 +1572,11 @@ function resetRun() {
   const S = CONFIG.SWING;
   // identical course on every retry (and on every device with this phrase)
   swing.courseName = currentCourseName();
+  // Latch the grab for the whole run. The panel is reachable mid-run, and a
+  // run played loose to the hard part then switched back would bank a
+  // loop-assisted number as an above-only best — exactly the comparison this
+  // is meant to protect. A toggle mid-run takes effect on the next one.
+  swing.grab = store.data.settings.grab;
   swing.rng = mulberry32(hashSeed(swing.courseName));
   Composite.clear(engine.world, false, true);
   state.particles = [];
@@ -1650,14 +1695,18 @@ function genTo(xLimit) {
 }
 
 // The peg a touch would hook right now: nearest one ahead, within rope range.
+// In the default 'above' grab the peg must also be overhead, so you always
+// hang from the swing; 'any' drops that rule and takes the nearest peg in any
+// direction, including one you have already fallen past (see GRAB_MODES).
 function candidatePeg() {
   const a = swing.avatar;
   if (!a) return null;
   const S = CONFIG.SWING;
+  const aboveOnly = activeGrab() === 'above';
   let best = null, bestD = S.ROPE_MAX;
   for (const p of swing.pegs) {
     if (p.x < a.position.x - S.AHEAD_BIAS) continue;
-    if (p.y > a.position.y - S.PEG_ABOVE_MIN) continue;  // hang below, never beside/above
+    if (aboveOnly && p.y > a.position.y - S.PEG_ABOVE_MIN) continue;  // never beside/below
     const d = Math.hypot(p.x - a.position.x, p.y - a.position.y);
     if (d < bestD) { bestD = d; best = p; }
   }
@@ -1770,19 +1819,23 @@ function swingDie() {
 
   const as = store.data.apex_swing;
   as.courseBest = as.courseBest || {};
-  const prev = as.courseBest[swing.courseName] || 0;
+  const key = bestKey(swing.courseName);   // this course, in this grab mode
+  const prev = as.courseBest[key] || 0;
   const newBest = m > prev && m >= S.NEW_BEST_MIN;
   as.runs++;
   as.bestDistance = Math.max(as.bestDistance, m);
-  as.courseBest[swing.courseName] = Math.max(prev, m);
+  as.courseBest[key] = Math.max(prev, m);
   const courses = Object.keys(as.courseBest);
   if (courses.length > 40) delete as.courseBest[courses[0]];   // keep the map small
   // every run is recordable-as-video until the next one starts; the run
-  // that set the course best also becomes its shareable replay
+  // that set the course best also becomes its shareable replay. phrase/grab
+  // are carried so the runs list can name the course without unpicking the
+  // key, and say which swing the run was set on.
   const code = encodeTrajectory(m);   // TR1: the recorded path, not the inputs
   swing.lastRunCode = code;
   if (m > prev) {
-    runs.put({ course: swing.courseName, code, dist: m, section: swing.section, at: Date.now() });
+    runs.put({ course: key, phrase: swing.courseName, grab: activeGrab(),
+               code, dist: m, section: swing.section, at: Date.now() });
   }
   store.save();
 
@@ -1795,7 +1848,7 @@ function swingDie() {
   // the instant go-again loop.
   const meaningful = newBest || swing.section > 1 || m >= S.WRECK_CARD_MIN_M;
   swing.pendingWreck = meaningful
-    ? { m, newBest, section: swing.section, best: as.courseBest[swing.courseName] }
+    ? { m, newBest, section: swing.section, best: as.courseBest[key] }
     : null;
   if (newBest) {
     sfx.newBest();
@@ -1945,7 +1998,7 @@ function swingTick(dt) {
   }
 
   // beyond the course best: fireworks in the background until the run ends
-  const prevBest = (store.data.apex_swing.courseBest || {})[swing.courseName] || 0;
+  const prevBest = (store.data.apex_swing.courseBest || {})[bestKey(swing.courseName)] || 0;
   if (prevBest > 0 && swing.dist > prevBest) {
     if (!swing.wasBeyond) {
       swing.wasBeyond = true;                 // opening salvo
@@ -1970,26 +2023,33 @@ function swingTick(dt) {
     const rl = Math.hypot(rx, ry) || 1;
 
     // Rope, not rod: a constraint can push, a rope can't. Go slack whenever
-    // the avatar is closer than the rope's length, so nothing carries you
-    // over the top — above the anchor you're simply ballistic.
-    // ...and never taut above the anchor, so nothing can carry you over the
-    // top: above peg level you're always ballistic, like a chain letting go.
+    // the avatar is closer than the rope's length, so tension can never
+    // shove you outward.
+    //
+    // The rest is the GRAB setting. 'above' is a playground swing: the line
+    // also goes slack above the anchor and a damping band bleeds speed near
+    // and past horizontal, so nothing — thrust, winch or a violent entry —
+    // carries you over the bar. 'any' keeps the line taut all the way round
+    // and takes neither bite out of the speed, so momentum you actually
+    // earned loops you over the peg (see GRAB_MODES).
+    const loop = activeGrab() === 'any';
     swing.rope.stiffness =
-      (rl >= swing.rope.length - 1 && ry > -8) ? S.ROPE_STIFFNESS : 0;
+      (rl >= swing.rope.length - 1 && (loop || ry > -8)) ? S.ROPE_STIFFNESS : 0;
 
-    // Thrust fades toward horizontal and cuts off past ~75 degrees — you
-    // can't jet yourself over the bar. Above the peg, the (slack) rope
-    // bleeds speed, so ballistic overshoot can't crest the anchor either.
     const belowness = clamp(ry / rl, 0, 1);   // 1 straight below, 0 at horizontal
-    if (ry < 0) {
-      Body.setVelocity(a, { x: a.velocity.x * 0.88, y: a.velocity.y * 0.88 });
-    } else if (belowness < 0.15) {
-      Body.setVelocity(a, { x: a.velocity.x * 0.93, y: a.velocity.y * 0.93 });
+    if (!loop) {
+      if (ry < 0) {
+        Body.setVelocity(a, { x: a.velocity.x * 0.88, y: a.velocity.y * 0.88 });
+      } else if (belowness < 0.15) {
+        Body.setVelocity(a, { x: a.velocity.x * 0.93, y: a.velocity.y * 0.93 });
+      }
     }
     // The jetpack is the swing's only energy input (see jetAction): a forward
     // thruster that fires on the forward stroke and kicks a dead hang forward,
     // never on the backswing. The force we apply here is exactly what the
     // visible flame is burning — one action, not a hidden pump plus a flame.
+    // It stays gated to the lower arc in BOTH grab modes: a loop has to be
+    // paid for with momentum you carried in, never thrust at the top.
     const jet = jetAction();
     if (jet.thrusting) {
       Body.applyForce(a, a.position, {
@@ -1997,7 +2057,8 @@ function swingTick(dt) {
         y: jet.ty * jet.dir * a.mass * S.PUMP_FORCE * jet.belowness,
       });
     }
-    // winch only in the lower half of the arc, so reeling in can't feed the crest
+    // winch only in the lower half of the arc, so reeling in can't feed the
+    // crest — same reason as the jet gate above, in both grab modes
     if (belowness > 0.5) {
       swing.rope.length = Math.max(S.ROPE_MIN, swing.rope.length - S.WINCH_RATE * dt);
     }
@@ -2499,8 +2560,8 @@ let swingHudLast = '';
 function updateSwingHud() {
   const m = Math.max(0, Math.round(swing.dist));
   const as = store.data.apex_swing;
-  // compete per course: the HUD best is for THIS seed phrase
-  const best = Math.max((as.courseBest || {})[swing.courseName] || 0, swing.sessionBest);
+  // compete per course: the HUD best is for THIS seed phrase, on this grab
+  const best = Math.max((as.courseBest || {})[bestKey(swing.courseName)] || 0, swing.sessionBest);
   const key = `${swing.section}|${m}|${best}`;
   if (key === swingHudLast) return;
   swingHudLast = key;
@@ -2742,6 +2803,12 @@ function playReplay(rep) {
     flash(`REPLAY · ${rep.dist} m RUN · TAP FOR OPTIONS`, COLORS.BIN, 9999999);
     return;
   }
+  // Input replays are the retired format: they resimulate, so the grab in
+  // force decides which peg each recorded hold hooks. Every one of them was
+  // recorded before the setting existed, i.e. on the above-only swing — pin
+  // that, or a viewer set to ANY PEG resimulates someone else's run against
+  // different rules and leaves the checkpoints to drag it back.
+  swing.grab = 'above';
   swing.playback = {
     kind: 'input',
     ticks: rep.ticks, idx: 0, hold: false,
@@ -2830,6 +2897,7 @@ function showWreckCard(info) {
 function returnToStart() {
   started = false;
   swing.awaitTap = false; swing.playback = null;
+  swing.grab = null;   // no run in force: the title screen answers to the setting
   audio.silenceLoops();
   if (swing.rope) { Composite.remove(engine.world, swing.rope); swing.rope = null; swing.ropePeg = null; }
   if (swing.avatar) { Composite.remove(engine.world, swing.avatar); swing.avatar = null; }
@@ -3215,7 +3283,7 @@ function renderShareCard() {
   }
 
   const as = store.data.apex_swing;
-  const best = Math.max((as.courseBest || {})[swing.courseName] || 0, swing.sessionBest);
+  const best = Math.max((as.courseBest || {})[bestKey(swing.courseName)] || 0, swing.sessionBest);
   let cleared = 0;
   for (let n = 1; sectionEndM(n) <= best; n++) cleared = n;
   // The instruction sits directly ON the phrase so there's no doubt about
@@ -3224,6 +3292,13 @@ function renderShareCard() {
   g.fillText('TYPE THIS PHRASE TO PLAY MY COURSE', S / 2, 268);
   g.fillStyle = '#cfe9ff'; g.font = `700 58px ${mono}`;
   g.fillText(`“${swing.courseName}”`, S / 2, 348);
+  // Say which swing the number was set on, so nobody chases a loop-grab
+  // distance on an above-only swing. Drawn only in that mode: the default
+  // card stays exactly as it was.
+  if (activeGrab() === 'any') {
+    g.fillStyle = rgba(CONFIG.SWING.AVATAR_COLOR, 0.9); g.font = `700 34px ${mono}`;
+    g.fillText('LOOP GRAB · ANY PEG', S / 2, 400);
+  }
   g.fillStyle = COLORS.GOOD; g.font = `800 220px ${mono}`;
   g.shadowColor = 'rgba(182,255,46,.6)'; g.shadowBlur = 42;
   g.fillText(`${best} m`, S / 2, 600);
@@ -3282,14 +3357,17 @@ function renderShareCard() {
 }
 
 // The one share sentence, for any course — the card, the video, and the
-// run-offer SHARE RUN all speak with the same voice.
-function shareRunText(course, best) {
-  return `${best} m on “${course}” in PegJump — tap to play the same course and beat it: ${courseLink(course)}`;
+// run-offer SHARE RUN all speak with the same voice. A loop-grab distance says
+// so: the link carries the course, not the swing it was set on, so the number
+// has to carry that itself or the friend chases it under different rules.
+function shareRunText(course, best, grab) {
+  const tag = (grab || activeGrab()) === 'any' ? ' (LOOP GRAB)' : '';
+  return `${best} m${tag} on “${course}” in PegJump — tap to play the same course and beat it: ${courseLink(course)}`;
 }
 
 function shareText() {
   const as = store.data.apex_swing;
-  const best = Math.max((as.courseBest || {})[swing.courseName] || 0, swing.sessionBest);
+  const best = Math.max((as.courseBest || {})[bestKey(swing.courseName)] || 0, swing.sessionBest);
   return shareRunText(swing.courseName, best);
 }
 
@@ -3313,7 +3391,7 @@ function blobToBase64(blob) {
 
 function shareScore() {
   const as = store.data.apex_swing;
-  const best = Math.max((as.courseBest || {})[swing.courseName] || 0, swing.sessionBest);
+  const best = Math.max((as.courseBest || {})[bestKey(swing.courseName)] || 0, swing.sessionBest);
   if (best <= 0) { flash('SET A DISTANCE FIRST', COLORS.BAD); return; }
   const text = shareText();
   renderShareCard().toBlob(async (blob) => {
@@ -3471,7 +3549,7 @@ function startVideoShareNative(rep) {
       lastUri = res && res.uri;
       if (!native.Share) throw new Error('share plugin missing');
       if (!lastUri) throw new Error('no file uri');
-      const best = (store.data.apex_swing.courseBest || {})[rep.course] || rep.dist;
+      const best = (store.data.apex_swing.courseBest || {})[bestKey(rep.course)] || rep.dist;
       // let the recorder's teardown finish before presenting UI over it
       return new Promise((r) => setTimeout(r, 350)).then(() => native.Share.share({
         text: shareRunText(rep.course, best),
@@ -3498,7 +3576,7 @@ function startVideoShare(rep) {
     return;
   }
   if (!rep) {
-    const code = swing.lastRunCode || runs.get(swing.courseName);
+    const code = swing.lastRunCode || runs.get(bestKey(swing.courseName));
     rep = code && decodeReplay(code);
   }
   if (!rep) { flash('PLAY A RUN FIRST', COLORS.BAD); return; }
@@ -3555,11 +3633,16 @@ function enterSwing() {
   else flash(swing.courseName, COLORS.SHAPES[1]);
 }
 
+// The best on show is the one you are about to play for: this course, on the
+// grab you are set to. Tagged when that is the loop, so a best that "vanished"
+// on toggling reads as the other contest, not as lost progress.
 function updateStart() {
-  const best = (store.data.apex_swing.courseBest || {})[currentCourseName()] || 0;
+  const course = currentCourseName();
+  const best = (store.data.apex_swing.courseBest || {})[bestKey(course)] || 0;
+  const tag = activeGrab() === 'any' ? ' · LOOP' : '';
   ui.startInfo.textContent = best > 0
-    ? `${currentCourseName()} · BEST ${best} m`
-    : currentCourseName();
+    ? `${course} · BEST ${best} m${tag}`
+    : course + tag;
 }
 
 function applyCourse(phrase) {
@@ -3719,7 +3802,7 @@ ui.startShare.addEventListener('pointerup', (e) => {
 
 /* ---- best-runs browser: watch / share / delete saved recordings ---- */
 function shareRunLinkFor(course) {
-  const m = (store.data.apex_swing.courseBest || {})[course] || 0;
+  const m = (store.data.apex_swing.courseBest || {})[bestKey(course)] || 0;
   const text = shareRunText(course, m);
   if (native.on && native.Share) {
     native.Share.share({ text, dialogTitle: 'Share your run' }).catch(() => {});
@@ -3751,12 +3834,21 @@ function renderRunsList() {
     return;
   }
   for (const rec of records) {
-    const course = rec.course;
+    const course = rec.course;              // the map key: phrase + grab tag
     const row = document.createElement('div');
     row.className = 'runRow';
     const name = document.createElement('div');
     name.className = 'runName';
-    name.textContent = course;
+    // The name stays the phrase you would type to play the course; the grab
+    // rides alongside it as a tag. Records from before the setting are 'above'.
+    name.textContent = rec.phrase || rec.course;
+    if (rec.grab === 'any') {
+      const tag = document.createElement('span');
+      tag.className = 'runGrab';
+      tag.textContent = ' ⟳';
+      tag.title = 'set with loop grab';
+      name.appendChild(tag);
+    }
     const dist = document.createElement('div');
     dist.className = 'runDist';
     dist.textContent = `${(as.courseBest || {})[course] || rec.dist || 0} m`;
@@ -3851,6 +3943,31 @@ ui.warnBtn.addEventListener('pointerup', (e) => {
   flash(...WARN_FLASH[s.hazardWarn]);
 });
 
+/* ---- grab: ABOVE (hang from the peg, never crest it) vs ANY (hook the
+   nearest peg in any direction and loop over the top on momentum) ---- */
+const GRAB_FLASH = {
+  above: ['GRAB ABOVE · ITS OWN BEST', COLORS.BIN],
+  any:   ['LOOP GRAB · ITS OWN BEST', COLORS.GOOD],
+};
+function updateGrabBtn() {
+  const mode = store.data.settings.grab;
+  ui.grabBtn.textContent = mode === 'any' ? 'GRAB · ANY PEG · LOOPS' : 'GRAB · ABOVE ONLY';
+  ui.grabBtn.classList.toggle('loose', mode === 'any');
+}
+ui.grabBtn.addEventListener('pointerup', (e) => {
+  e.stopPropagation();
+  const s = store.data.settings;
+  s.grab = GRAB_MODES[(GRAB_MODES.indexOf(s.grab) + 1) % GRAB_MODES.length];
+  store.save();
+  updateGrabBtn();
+  updateStart();      // the title's best belongs to a grab: show the new one
+  sfx.tick();
+  // Mid-run the panel is the pause menu, and the run already latched its grab
+  // (see resetRun) — say so rather than let the change look like it took.
+  const [msg, color] = GRAB_FLASH[s.grab];
+  flash(started ? `${msg} · NEXT RUN` : msg, color);
+});
+
 function updateThemeBtn() { ui.themeBtn.textContent = 'FX · ' + store.data.settings.theme.toUpperCase(); }
 ui.themeBtn.addEventListener('pointerup', (e) => {
   e.stopPropagation();
@@ -3926,7 +4043,7 @@ ui.wreckQuit.addEventListener('pointerup', (e) => {
 function closeMenu() { ui.menuModal.classList.add('hidden'); }
 
 // One panel, two doors: mid-run it is the pause menu, and from the title
-// screen the same four toggles are just settings. Sound and theme are exactly
+// screen the same toggles are just settings. Sound and theme are exactly
 // what a player wants to set BEFORE starting, which the pause-only route made
 // impossible without first starting a run to interrupt.
 function openMenu() {
@@ -4138,6 +4255,9 @@ store.load();
 runs.load();   // async: recordings arrive shortly after boot
 // Retire the old arcade/retro/toy theme names from any existing save.
 if (!THEMES.includes(store.data.settings.theme)) { store.data.settings.theme = 'rhythm'; store.save(); }
+// A save written before the GRAB setting existed was played on 'above'; so is
+// anything unrecognised. Never boot a run into physics nobody chose.
+if (!GRAB_MODES.includes(store.data.settings.grab)) { store.data.settings.grab = 'above'; store.save(); }
 // Land on today's daily: a custom or shared phrase (or a stale
 // "DAILY <old-date>") from a previous session shouldn't carry over. A shared
 // link opened on launch overrides this — checkSharedCourseLink() runs later
@@ -4147,6 +4267,7 @@ updateSoundBtn();
 updateThemeBtn();
 updateWarnBtn();
 updateModeBtns();
+updateGrabBtn();
 updateStart();
 resize();
 // Viewer build: strip every route into free play — spectating and store
