@@ -251,7 +251,7 @@
   #storeLinks, #runOfferStore { display: flex; flex-direction: column; gap: 12px; }
   #storeLinks { margin-top: 26px; }
   #runOfferStore { margin-top: 2px; }
-  .playLink, .itchLink, .discordLink, .ytLink, .comingSoon {
+  .playLink, .itchLink, .discordLink, .ytLink {
     font-family: var(--mono); font-size: 13px; letter-spacing: 3px; text-align: center;
     text-decoration: none; padding: 13px 26px; border-radius: 6px; touch-action: manipulation;
   }
@@ -263,7 +263,6 @@
   .discordLink:active { background: rgba(88,101,242,.15); }
   .ytLink { color: #ff6b6b; border: 1px solid rgba(255,0,0,.5); font-size: 11px; }
   .ytLink:active { background: rgba(255,0,0,.15); }
-  .comingSoon { color: rgba(255,255,255,.4); border: 1px dashed rgba(255,255,255,.2); font-size: 11px; cursor: default; }
   /* The store the visitor can't install from: still reachable (they may be
      passing the link on), just no longer the thing the eye lands on. Must
      follow .playLink — same specificity, so source order decides. */
@@ -347,10 +346,8 @@
     <button id="startMode" type="button">MODE &middot; NORMAL</button>
     <div id="storeLinks" class="hidden">
       <a id="appStoreLink" class="playLink" data-store="ios" href="https://apps.apple.com/app/id6793646569" target="_blank" rel="noopener">GET THE APP &middot; APP STORE</a>
-      <!-- Once it's live on Play, swap this span back for:
-           <a class="playLink" data-store="android" href="https://play.google.com/store/apps/details?id=com.ydbendasan.apexswing" target="_blank" rel="noopener">GET THE APP &middot; GOOGLE PLAY</a> -->
-      <span class="comingSoon" data-store="android" data-soon>GOOGLE PLAY &middot; COMING SOON</span>
-      <a id="itchLink" class="itchLink" data-browser href="https://ydbendasan.itch.io/perfect-arcade" target="_blank" rel="noopener">PLAY IN BROWSER &middot; ITCH.IO</a>
+      <a id="playStoreLink" class="playLink" data-store="android" href="https://play.google.com/store/apps/details?id=com.ydbendasan.apexswing" target="_blank" rel="noopener">GET THE APP &middot; GOOGLE PLAY</a>
+      <a id="itchLink" class="itchLink" href="https://ydbendasan.itch.io/perfect-arcade" target="_blank" rel="noopener">PLAY IN BROWSER &middot; ITCH.IO</a>
       <a id="ytLink" class="ytLink" href="https://www.youtube.com/@PegJump" target="_blank" rel="noopener">WATCH DAILY RUNS &middot; YOUTUBE</a>
       <a id="discordLink" class="discordLink" href="https://discord.gg/e25skUcyw" target="_blank" rel="noopener">JOIN THE COMMUNITY &middot; DISCORD</a>
     </div>
@@ -372,8 +369,8 @@
       </div>
       <div id="runOfferStore" class="hidden">
         <a class="playLink" data-store="ios" href="https://apps.apple.com/app/id6793646569" target="_blank" rel="noopener">GET THE APP &middot; APP STORE</a>
-        <span class="comingSoon" data-store="android" data-soon>GOOGLE PLAY &middot; COMING SOON</span>
-        <a class="itchLink" data-browser href="https://ydbendasan.itch.io/perfect-arcade" target="_blank" rel="noopener">PLAY IN BROWSER &middot; ITCH.IO</a>
+        <a class="playLink" data-store="android" href="https://play.google.com/store/apps/details?id=com.ydbendasan.apexswing" target="_blank" rel="noopener">GET THE APP &middot; GOOGLE PLAY</a>
+        <a class="itchLink" href="https://ydbendasan.itch.io/perfect-arcade" target="_blank" rel="noopener">PLAY IN BROWSER &middot; ITCH.IO</a>
         <a class="ytLink" href="https://www.youtube.com/@PegJump" target="_blank" rel="noopener">WATCH DAILY RUNS &middot; YOUTUBE</a>
         <a class="discordLink" href="https://discord.gg/e25skUcyw" target="_blank" rel="noopener">JOIN THE COMMUNITY &middot; DISCORD</a>
       </div>
@@ -620,11 +617,9 @@ function visitorStore() {
   return '';   // desktop or unknown: leave both stores as they are
 }
 
-// Lead with whatever this visitor can act on right now: their own store, or —
-// while that store is still marked COMING SOON — the browser build, which
-// they can play immediately. The notice keeps its place so they learn the app
-// is on the way. The other store steps back but stays tappable; a desktop
-// visitor is often passing the link on.
+// Lead with the store this visitor can install from right now. Both are live,
+// so their own store goes to the top; the other steps back but stays tappable,
+// since a desktop visitor is often passing the link on.
 function leadWithVisitorStore() {
   const want = visitorStore();
   if (!want) return;
@@ -633,13 +628,7 @@ function leadWithVisitorStore() {
     if (!box) continue;
     const mine = box.querySelector(`[data-store="${want}"]`);
     if (!mine) continue;
-    const lead = mine.hasAttribute('data-soon') ? box.querySelector('[data-browser]') : mine;
-    if (lead) {
-      box.insertBefore(lead, box.firstChild);
-      // keep the COMING SOON notice directly under the browser build, so the
-      // promise sits next to the thing they can play today
-      if (lead !== mine) box.insertBefore(mine, lead.nextSibling);
-    }
+    box.insertBefore(mine, box.firstChild);
     for (const el of box.querySelectorAll('[data-store]')) {
       if (el !== mine) el.classList.add('storeAlt');
     }
